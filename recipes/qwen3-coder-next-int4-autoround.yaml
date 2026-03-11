@@ -14,7 +14,7 @@ solo_only: true
 # Container image to use
 container: vllm-node
 
-# Mod required to fix slowness and crash in the cluster (tracking https://github.com/vllm-project/vllm/issues/33857)
+# Mod required to fix autoround weight loading issues
 mods:
   - mods/fix-qwen3-next-autoround
 
