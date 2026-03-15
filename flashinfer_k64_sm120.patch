@@ -1,22 +1,15 @@
---- a/3rdparty/cutlass/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl	2026-03-14 20:29:19.169219173 -0400
-+++ b/3rdparty/cutlass/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl	2026-03-14 12:27:05.000000000 -0400
-@@ -1,5 +1,5 @@
- /***************************************************************************************************
-- * Copyright (c) 2025 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-+ * Copyright (c) 2025 - 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-  * SPDX-License-Identifier: BSD-3-Clause
-  *
-  * Redistribution and use in source and binary forms, with or without
+--- a/3rdparty/cutlass/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl
++++ b/3rdparty/cutlass/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl
 @@ -177,31 +177,53 @@
    using SmemCopyAtomsB = decltype(cute::make_tuple(SmemCopyAtomB{}, SmemCopyAtomSFB{}));
- 
+
    // Construct SMEM layout for SF
 -  // A single indivisible block will hold 4 scale factors of 128 rows/columns (A/B matrix).
--  // 4 is chosen to make consecutive 32bits of data to have scale factors for only a single row (col). 32bits corresponds to the TMEM word size 
+-  // 4 is chosen to make consecutive 32bits of data to have scale factors for only a single row (col). 32bits corresponds to the TMEM word size
 +  // A single indivisible block will hold Blk_SF (4) scale factors of 128 rows/columns (A/B matrix).
 +  // 4 is chosen to make consecutive 32bits of data to have scale factors for only a single row (col). 32bits corresponds to the TMEM word size
    using Blk_MN    = typename Sm1xxBlkScaledConfig::Blk_MN;
--  using Blk_SF    = typename Sm1xxBlkScaledConfig::Blk_SF; 
+-  using Blk_SF    = typename Sm1xxBlkScaledConfig::Blk_SF;
 -  using Blk_Elems = decltype(Blk_MN{} * Blk_SF{});
 +  using Blk_SF    = typename Sm1xxBlkScaledConfig::Blk_SF;
 +
@@ -32,7 +25,7 @@
 +  // Determine if we need to fold EffBlk_SF into the basic block to keep TMA layouts flat.
 +  // This is needed when EffBlk_SF > MMA_NSF (i.e. the outer K shape would be non-trivial).
 +  static constexpr bool FoldSFIntoBasicBlock = (NumSFAlongK < Blk_SF{}) && (int(EffBlk_SF{}) > MMA_NSF);
- 
+
    // Basic storage block for new Scaling Factor Layouts
    using mnBasicBlockShape  =  Shape<_32,_4>;
    using mnBasicBlockStride = Stride<_16,_4>;
@@ -43,7 +36,7 @@
 +      Shape<Int<SFVectorSize>, EffBlk_SF>,
 +      Shape<Int<SFVectorSize>, Int<MMA_NSF>>>;
    using kBasicBlockStride = Stride<_0, _1>;
--  
+-
 +
 +  // Outer K shape: when folded, both dimensions are 1 (trivial); when not folded, original formula
 +  using OuterK0 = cute::conditional_t<FoldSFIntoBasicBlock, _1, decltype(EffBlk_SF{}/Int<MMA_NSF>{})>;
@@ -56,7 +49,7 @@
 +  using sSF_strideMN      = decltype(prepend(                      EffBlk_Elems{},  mnBasicBlockStride{}));
    using sSFA_strideM      = sSF_strideMN;
 -  using sSF_shapeK        = decltype(prepend(make_shape( Blk_SF{}/Int<MMA_NSF>{},   size<2>(TileShape_MNK{}) / Int<SFVectorSize>{} / Blk_SF{}),  kBasicBlockShape{}));
--  
+-
 -  using sSFA_strideK      = decltype(prepend(make_stride(         Int<MMA_NSF>{},   size<0>(TileShape_MNK{}) / Blk_MN{} * Blk_Elems{}), kBasicBlockStride{}));
 +  using sSF_shapeK        = decltype(prepend(make_shape( OuterK0{},   OuterK1{}),  kBasicBlockShape{}));
 +
@@ -64,7 +57,7 @@
    using sSFA_shape        = decltype(make_shape(  sSFA_shapeM{},   sSF_shapeK{}));
    using sSFA_stride       = decltype(make_stride(sSFA_strideM{}, sSFA_strideK{}));
    using SmemLayoutAtomSFA = decltype(make_layout(  sSFA_shape{},  sSFA_stride{}));
- 
+
    using sSFB_shapeN       = decltype(prepend(size<1>(TileShape_MNK{}) / Blk_MN{},   mnBasicBlockShape{}));
    using sSFB_strideN      = sSF_strideMN;
 -  using sSFB_strideK      = decltype(prepend(make_stride(Int<MMA_NSF>{},   size<1>(TileShape_MNK{}) / Blk_MN{} * Blk_Elems{}), kBasicBlockStride{}));
@@ -72,156 +65,3 @@
    using sSFB_shape        = decltype(make_shape(  sSFB_shapeN{},   sSF_shapeK{}));
    using sSFB_stride       = decltype(make_stride(sSFB_strideN{}, sSFB_strideK{}));
    using SmemLayoutAtomSFB = decltype(make_layout(  sSFB_shape{},  sSFB_stride{}));
---- a/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch_tma_ws.h	2026-03-14 20:32:13.789673775 -0400
-+++ b/csrc/nv_internal/tensorrt_llm/kernels/cutlass_kernels/moe_gemm/moe_gemm_template_dispatch_tma_ws.h	2026-03-14 03:38:34.000000000 -0400
-@@ -309,7 +309,10 @@
-   return (TileM == 128 && TileN == 128 && TileK == 128) ||
-          (TileM == 128 && TileN == 128 && TileK == 256) ||
-          (TileM == 128 && TileN == 256 && TileK == 128) ||
--         (TileM == 256 && TileN == 128 && TileK == 128);
-+         (TileM == 256 && TileN == 128 && TileK == 128) ||
-+         (TileM == 128 && TileN == 128 && TileK == 64) ||
-+         (TileM == 128 && TileN == 256 && TileK == 64) ||
-+         (TileM == 256 && TileN == 128 && TileK == 64);
- }
- 
- /*
---- a/flashinfer/jit/gemm/cutlass/generate_kernels.py	2026-03-14 20:32:13.894674050 -0400
-+++ b/flashinfer/jit/gemm/cutlass/generate_kernels.py	2026-03-14 03:34:19.000000000 -0400
-@@ -760,8 +760,11 @@
-     quant_ops = [TrtLlm_QuantOp.none]
-     epi_tags = [TrtLlm_EpilogueTag.epilogue_op_default]
-     cta_shapes_mnk = [
-+        [128, 128, 64],
-         [128, 128, 128],
-         [128, 128, 256],
-+        [128, 256, 64],
-+        [256, 128, 64],
-         [256, 128, 128],
-         [128, 256, 128],
-     ]
-@@ -807,9 +810,9 @@
-         else:
-             act_type, weight_type = dtype, dtype
- 
--        # Minimal filter: for mixed FP8xFP4 on SM120/SM121, only emit 128x128x128
-+        # For mixed FP8xFP4 on SM120/SM121, emit 128x128x128 and K=64 shapes
-         if act_type == DataType.e4m3 and weight_type == e2m1:
--            if cta_shape_mnk != [128, 128, 128]:
-+            if cta_shape_mnk not in ([128, 128, 128], [128, 128, 64], [128, 256, 64], [256, 128, 64]):
-                 continue
- 
-         otypes = [act_type]
-@@ -992,7 +995,6 @@
-         (16, 256, 64),
-         (32, 128, 64),
-         (64, 128, 64),
--        (128, 128, 64),
-     ]
- 
-     stages = [2, 3, 4]
---- a/3rdparty/cutlass/include/cute/atom/copy_traits_sm90_tma.hpp	2026-03-13 17:25:36.000000000 -0400
-+++ b/3rdparty/cutlass/include/cute/atom/copy_traits_sm90_tma.hpp	2026-03-14 12:51:12.000000000 -0400
-@@ -1,5 +1,5 @@
- /***************************************************************************************************
-- * Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-+ * Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-  * SPDX-License-Identifier: BSD-3-Clause
-  *
-  * Redistribution and use in source and binary forms, with or without
-@@ -51,8 +51,12 @@
- struct AuxTmaParams {
-   using GmemStrides  = GmemTmaBasisStrides_;    // Strides for Gmem mode -> Tma coord mode, may be dynamic
-   GmemStrides g_stride_;
--  using TmaGmemBasis = TmaGmemBasis_;           // Layout for Tma box shape -> Gmem mode(s), always static
--  static_assert(is_static<TmaGmemBasis>::value);
-+  using TmaGmemBasis = TmaGmemBasis_;           // Layout for Tma box shape -> Gmem mode(s)
-+  // By default, TmaGmemBasis produced by construct_tma_gbasis is fully static.
-+  // The user may construct a dynamic gbasis manually (e.g. to represent smem box with dynamic shape).
-+  // In that case they will need to pass it around via other means.
-+  // We avoid passing it as a data member to avoid ABI impact.
-+  // static_assert(is_static<TmaGmemBasis>::value);
-   using TmaSwizzle   = TmaSwizzle_;             // Tma swizzle, always Swizzle<B,M,S>
-   static_assert(is_static<TmaSwizzle>::value);
- };
-@@ -70,7 +74,7 @@
-   {
-     static_assert(is_smem<TD>::value, "SM90_TMA_LOAD requires the destination be shared memory.");
- 
--    auto src_coord = src.data().coord_;
-+    auto src_coord = src(Int<0>{});
-     void* dst_ptr = cute::raw_pointer_cast(dst.data());
- #if 0
-     auto [c0,c1,c2,c3,c4] = append<5>(src_coord, 0);
-@@ -237,7 +241,7 @@
-               Tensor<TS,SLayout> const& src,
-               Tensor<TD,DLayout>      & dst)
-   {
--    auto src_coord = src.data().coord_;
-+    auto src_coord = src(Int<0>{});
-     return detail::explode_tuple(detail::CallCOPY<SM90_TMA_LOAD::PREFETCH>{},
-                                  traits.opargs_, tuple_seq<decltype(traits.opargs_)>{},
-                                  src_coord, tuple_seq<decltype(src_coord)>{});
-@@ -405,7 +409,7 @@
- 
-     void const* const desc_ptr = &(traits.tma_desc_);
-     void const* const src_ptr  = cute::raw_pointer_cast(src.data());
--    auto dst_coord = dst.data().coord_;
-+    auto dst_coord = dst(Int<0>{});
- #if 0
-     auto [c0,c1,c2,c3,c4] = append<5>(dst_coord, 0);
-     printf("THR (%d,%d,%d) BLK (%d,%d,%d) TMACRD (%d,%d,%d,%d,%d) SMEMADDR (%p)\n",
-@@ -446,7 +450,7 @@
- 
-     void const* const desc_ptr = traits.tma_desc_;
-     void const* const src_ptr  = cute::raw_pointer_cast(src.data());
--    auto dst_coord = dst.data().coord_;
-+    auto dst_coord = dst(Int<0>{});
- #if 0
-     auto [c0,c1,c2,c3,c4] = append<5>(dst_coord, 0);
-     printf("THR (%d,%d,%d) BLK (%d,%d,%d) TMACRD (%d,%d,%d,%d,%d) SMEMADDR (%p)\n",
-@@ -531,7 +535,8 @@
-     static_assert(is_smem<TS>::value, "Expected smem src for SM90_TMA_REDUCE_ADD");
-     //static_assert(is_gmem<TD>::value, "Expected gmem dst for SM90_TMA_REDUCE_ADD");  // TMA spoofed src tensor
- 
--    traits.copy_unpack_(cute::raw_pointer_cast(src.data()), dst.data().coord_, tuple_seq<decltype(dst.data().coord_)>{});
-+    auto dst_coord = dst(Int<0>{});
-+    traits.copy_unpack_(cute::raw_pointer_cast(src.data()), dst_coord, tuple_seq<decltype(dst_coord)>{});
-   }
- };
- 
-@@ -869,8 +874,14 @@
-     if constexpr (tma_i_rank == 1) {
-       // Trivial contribution of this gmem mode to this tma mode
-       auto ej = unwrap(get<i>(tma_gbasis_stride));
--      gmem_prob_shape[i]  = basis_get(ej, gmem_shape);
--      gmem_prob_stride[i] = basis_get(ej, gmem_stride);
-+      if constexpr (cute::is_constant<0, decltype(ej)>::value) {
-+        // Zero-stride basis: broadcast dimension (e.g. SFVectorSize), shape=1, stride=0
-+        gmem_prob_shape[i]  = 1;
-+        gmem_prob_stride[i] = 0;
-+      } else {
-+        gmem_prob_shape[i]  = basis_get(ej, gmem_shape);
-+        gmem_prob_stride[i] = basis_get(ej, gmem_stride);
-+      }
-     } else {
-       // Apply a recurrence to each gmem mode that contributes to this tma mode
-       for_each(get<i>(tma_gbasis_stride), [&](auto ej) {
-@@ -1051,6 +1062,17 @@
-         smem_swizzle,
-         tma_l2Promotion,
-         tma_oobFill);
-+   
-+    int driver_version = 0;
-+    cudaError_t driver_version_err = cudaDriverGetVersion(&driver_version);
-+    assert(driver_version_err == cudaSuccess);
-+    if (driver_version <= 13010) {      
-+      if (cute::bits_to_bytes(
-+            cute::cosize(gtensor.layout()) *
-+            cute::sizeof_bits<typename GEngine::value_type>::value) < 131072) {
-+        reinterpret_cast<uint64_t*>(&tma_desc)[1] &= ~(1llu << 21);
-+      }
-+    }
- 
-     if (result != CUDA_SUCCESS) {
-       std::cerr << "TMA Desc Addr:   " << &tma_desc

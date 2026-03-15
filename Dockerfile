@@ -105,6 +105,11 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 
 WORKDIR /workspace/flashinfer
 
+# Bump CUTLASS submodule to v4.4.1 (includes TMA coord and zero-stride basis fixes needed for SM120)
+RUN cd 3rdparty/cutlass && \
+    git fetch origin tag v4.4.1 --no-recurse-submodules && \
+    git checkout v4.4.1
+
 ARG FLASHINFER_PRS=""
 
 RUN if [ -n "$FLASHINFER_PRS" ]; then \
@@ -115,8 +120,9 @@ RUN if [ -n "$FLASHINFER_PRS" ]; then \
         done; \
     fi
 
-# Apply K=64 SM120 CUTLASS patch (fixes TMA layout for workstation Blackwell GPUs)
-# Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
+# Apply K=64 SM120 block-scaled MoE GEMM patch (EffBlk_SF / FoldSFIntoBasicBlock)
+# Reference: https://github.com/NVIDIA/cutlass/issues/3096
+#            https://github.com/brandonmmusic-max/sm120-moe-bench/tree/master/patches
 COPY flashinfer_k64_sm120.patch .
 RUN if [ -f flashinfer_k64_sm120.patch ]; then \
         if patch -p1 --dry-run --reverse < flashinfer_k64_sm120.patch &>/dev/null; then \
