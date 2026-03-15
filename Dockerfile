@@ -112,6 +112,11 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 
 WORKDIR /workspace/flashinfer
 
+# Bump CUTLASS submodule to v4.4.1 (includes TMA coord and zero-stride basis fixes needed for SM120)
+RUN cd 3rdparty/cutlass && \
+    git fetch origin tag v4.4.1 --no-recurse-submodules && \
+    git checkout v4.4.1
+
 ARG FLASHINFER_PRS=""
 
 RUN if [ -n "$FLASHINFER_PRS" ]; then \
