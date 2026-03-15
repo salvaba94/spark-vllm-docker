@@ -105,6 +105,28 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 
 WORKDIR /workspace/flashinfer
 
+ARG FLASHINFER_PRS=""
+
+RUN if [ -n "$FLASHINFER_PRS" ]; then \
+        echo "Applying FlashInfer PRs: $FLASHINFER_PRS"; \
+        for pr in $FLASHINFER_PRS; do \
+            echo "Fetching and applying FlashInfer PR #$pr..."; \
+            curl -fL "https://github.com/flashinfer-ai/flashinfer/pull/${pr}.diff" | git apply -v; \
+        done; \
+    fi
+
+# Apply K=64 SM120 CUTLASS patch (fixes TMA layout for workstation Blackwell GPUs)
+# Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
+COPY flashinfer_k64_sm120.patch .
+RUN if [ -f flashinfer_k64_sm120.patch ]; then \
+        if patch -p1 --dry-run --reverse < flashinfer_k64_sm120.patch &>/dev/null; then \
+            echo "K=64 SM120 patch already applied"; \
+        else \
+            echo "Applying K=64 SM120 CUTLASS patch..." && \
+            patch -p1 < flashinfer_k64_sm120.patch; \
+        fi; \
+    fi
+
 # Apply patch to avoid re-downloading existing cubins
 COPY flashinfer_cache.patch .
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \

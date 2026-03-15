@@ -1,0 +1,64 @@
+# Recipe: Qwen3.5-397B-A17B-NVFP4
+# Optimized for SM120 Blackwell workstation GPUs (RTX PRO 6000, RTX 5090, DGX Spark)
+# Requires FlashInfer PR #2786 (K=64 CUTLASS kernel fix for SM120 SMEM)
+# Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
+
+recipe_version: "1"
+name: Qwen3.5-397B-A17B-NVFP4
+description: >
+  vLLM serving Qwen3.5-397B-A17B-NVFP4 with K=64 CUTLASS kernel fix for SM120.
+  Fixes "Failed to initialize cutlass TMA WS grouped gemm" on workstation Blackwell GPUs.
+
+# HuggingFace model to download (optional, for --download-model)
+model: sehyo/Qwen3.5-397B-A17B-NVFP4
+
+# Container image to use
+container: vllm-node-tf5
+
+build_args:
+  - --tf5
+  - --rebuild-flashinfer
+
+# Mod required to fix ROPE syntax error
+mods:
+  - mods/fix-qwen3.5-autoround
+
+# Default settings (can be overridden via CLI)
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 4
+  gpu_memory_utilization: 0.85
+  max_model_len: 262144
+  max_num_batched_tokens: 8192
+
+# Environment variables
+# SM120 optimization notes:
+#   NCCL_P2P_DISABLE: Needed for AMD-Vi IOMMU (Threadripper). Remove if using iommu=pt kernel param.
+#   OMP_NUM_THREADS: Keep low to avoid oversubscription with TP=4.
+#   CUDA_DEVICE_MAX_CONNECTIONS: Improves CUDA stream concurrency.
+#   PYTORCH_CUDA_ALLOC_CONF: Reduces memory fragmentation.
+env:
+  NCCL_P2P_DISABLE: "1"
+  OMP_NUM_THREADS: "6"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+
+# The vLLM serve command template
+command: |
+  vllm serve sehyo/Qwen3.5-397B-A17B-NVFP4 \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --port {port} \
+    --host {host} \
+    --enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --trust-remote-code \
+    -tp {tensor_parallel} \
+    --max-num-seqs 32 \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":5}}'
