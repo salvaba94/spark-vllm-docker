@@ -131,7 +131,7 @@ This will run the model on all available cluster nodes.
 
 **IMPORTANT**
 
-You may want to prune your build cache every once in a while, especially if you've been using these container builds since the beginning. 
+You may want to prune your build cache every once in a while, especially if you've been using these container builds since the beginning.
 
 You can check the build cache size by running:
 
@@ -149,7 +149,67 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-03-17
+
+#### Major Cluster Orchestration Refactoring
+
+Significantly refactored the internal cluster startup logic in `launch-cluster.sh`:
+- Removed the standalone `run-cluster-node.sh` script; its logic is now fully integrated into `launch-cluster.sh`.
+- Ray head/worker startup, environment variable injection, and launch script distribution are now handled by `launch-cluster.sh` directly.
+- Worker containers are started with proper per-node environment variables (`VLLM_HOST_IP`, `NCCL_SOCKET_IFNAME`, etc.) injected via `docker run`/`docker exec` instead of relying on `.bashrc`.
+
+#### No-Ray Multi-Node Mode
+
+Added `--no-ray` flag to `launch-cluster.sh` to run multi-node vLLM clusters without Ray, using PyTorch's native distributed backend instead. It slightly improves inference performance for most models and reduces memory requirements.
+
+```bash
+./launch-cluster.sh --no-ray exec vllm serve ...
+```
+
+`--no-ray` is incompatible with `--solo` (which already runs without Ray).
+
+#### `run-recipe.sh` No-Ray Mode and Extended Flag Passthrough
+
+`run-recipe.sh` now supports `--no-ray` flag for running multi-node inference without Ray (uses PyTorch distributed backend instead):
+
+```bash
+./run-recipe.sh qwen3.5-122b-fp8 --no-ray
+```
+
+The following `launch-cluster.sh` flags are now also passed through from `run-recipe.sh`:
+`--name`, `--eth-if`, `--ib-if`, `-j`, `--no-cache-dirs`, `--non-privileged`, `--mem-limit-gb`, `--mem-swap-limit-gb`, `--pids-limit`, `--shm-size-gb`.
+
+#### Nemotron-3-Nano-NVFP4 Switched to Marlin Backend
+
+The `nemotron-3-nano-nvfp4` recipe has been updated to use the Marlin backend for better performance and reliability (until Flashinfer fully supports NVFP4 on sm121).
+
 ### 2026-03-12
+
+#### Experimental `--gpu-memory-utilization-gb` Mod
+
+Added a new mod `mods/gpu-mem-util-gb` that adds a `--gpu-memory-utilization-gb` flag to vLLM, allowing you to specify GPU memory reservation in GiB instead of as a fraction. This is particularly useful on DGX Spark's unified memory architecture where available memory changes dynamically.
+
+```bash
+./launch-cluster.sh --apply-mod mods/gpu-mem-util-gb exec vllm serve ... \
+  --gpu-memory-utilization-gb 110
+```
+
+Cannot be used simultaneously with `--kv-cache-memory-bytes`.
+
+#### Qwen3.5-397B INT4-AutoRound TP=4 Recipe (4× Spark Cluster)
+
+Added `recipes/4x-spark-cluster/qwen3.5-397b-int4-autoround.yaml` for running Intel/Qwen3.5-397B-A17B-int4-AutoRound across 4 DGX Spark nodes with tensor parallelism (TP=4).
+
+Benchmarked at ~37 tok/s single-user, ~103 tok/s aggregate (4 concurrent users).
+
+Includes a new mod `mods/fix-qwen35-tp4-marlin` that resolves a Marlin kernel constraint (`MIN_THREAD_N=64`) that breaks certain projection layers at TP=4.
+
+**Note:** Requires NVIDIA driver 580.x. Driver 590.x has a CUDAGraph capture deadlock on GB10 unified memory.
+
+```bash
+./run-recipe.sh 4x-spark-cluster/qwen3.5-397b-int4-autoround
+```
+Thanks @sonusflow for the contribution.
 
 #### Nemotron-3-Super-120B NVFP4 Recipe
 
@@ -892,6 +952,7 @@ You can override the auto-detected values if needed:
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |
 | `--solo` | Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster |
+| `--no-ray` | No-Ray mode: run multi-node vLLM without Ray (uses PyTorch distributed backend). |
 | `--no-cache-dirs` | Do not mount default cache directories (~/.cache/vllm, ~/.cache/flashinfer, ~/.triton). |
 | `--launch-script` | Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted. |
 | `-d` | Run in daemon mode (detached). |
