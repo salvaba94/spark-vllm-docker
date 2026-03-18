@@ -105,10 +105,22 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 
 WORKDIR /workspace/flashinfer
 
-# Bump CUTLASS submodule to v4.4.1 (includes TMA coord and zero-stride basis fixes needed for SM120)
+# Bump CUTLASS to v4.4.2 — fixes grouped GEMM SMEM stage count (PR #3092),
+# TMA descriptor alignment (#2905/#2906), and zero-stride TMA basis.
+# This eliminates the need for our K=64 TMA patch against v4.2.1.
+# Reference: https://github.com/NVIDIA/cutlass/issues/3096
 RUN cd 3rdparty/cutlass && \
-    git fetch origin tag v4.4.1 --no-recurse-submodules && \
-    git checkout v4.4.1
+    git fetch origin && \
+    git checkout v4.4.2 && \
+    cd ../..
+
+# Enable GDC (Grid Dependency Control) for SM100+ — without this flag,
+# PDL barriers compile as no-ops, causing race conditions and NaN in
+# concurrent MoE kernel launches. (FlashInfer PR #2780)
+# Note: CMAKE_CUDA_FLAGS is set for the FlashInfer build only (this stage).
+# It will NOT carry over to the vLLM build stage.
+ARG GDC_FLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
+ENV CMAKE_CUDA_FLAGS="${GDC_FLAGS}"
 
 ARG FLASHINFER_PRS=""
 
@@ -120,18 +132,29 @@ RUN if [ -n "$FLASHINFER_PRS" ]; then \
         done; \
     fi
 
-# Apply K=64 SM120 block-scaled MoE GEMM patch (EffBlk_SF / FoldSFIntoBasicBlock)
-# Reference: https://github.com/NVIDIA/cutlass/issues/3096
-#            https://github.com/brandonmmusic-max/sm120-moe-bench/tree/master/patches
-COPY flashinfer_k64_sm120.patch .
-RUN if [ -f flashinfer_k64_sm120.patch ]; then \
-        if patch -p1 --dry-run --reverse < flashinfer_k64_sm120.patch &>/dev/null; then \
-            echo "K=64 SM120 patch already applied"; \
+# Apply E2M1 SM121 fix: remove SM121 from CUDA_PTX_FP4FP6_CVT_ENABLED
+# SM121 (GB10) lacks cvt.rn.satfinite.e2m1x2.f32 PTX instruction
+# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
+COPY flashinfer_e2m1_sm121.patch .
+RUN if [ -f flashinfer_e2m1_sm121.patch ]; then \
+        if patch -p1 --dry-run --reverse < flashinfer_e2m1_sm121.patch &>/dev/null; then \
+            echo "E2M1 SM121 CUTLASS patch already applied"; \
         else \
-            echo "Applying K=64 SM120 CUTLASS patch..." && \
-            patch -p1 < flashinfer_k64_sm120.patch; \
+            echo "Applying E2M1 SM121 CUTLASS patch..." && \
+            patch -p1 < flashinfer_e2m1_sm121.patch; \
         fi; \
     fi
+
+# Fix TRT-LLM quantization_utils.cuh for SM121: add software E2M1 conversion
+# fallback ONLY in the low-level fp32_vec_to_e2m1 functions.
+# IMPORTANT: Do NOT globally exclude SM121 from all >= 1000 guards — the
+# higher-level wrapper functions (cvt_warp_fp16_to_fp4, etc.) must be allowed
+# to enter the >= 1000 path on SM121. They do generic float math and call
+# fp32_vec_to_e2m1 which has the software fallback. Excluding SM121 from
+# the wrappers causes them to return 0 with uninitialized scale factors → NaN.
+# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
+COPY fix_quantization_utils_sm121.py .
+RUN python3 fix_quantization_utils_sm121.py
 
 # Apply patch to avoid re-downloading existing cubins
 COPY flashinfer_cache.patch .
@@ -224,6 +247,19 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
+
+# Apply E2M1 software conversion for SM121 (GB10) - enables CUDA graphs with NVFP4
+# SM121 lacks cvt.rn.satfinite.e2m1x2.f32 PTX; this adds a software fallback
+# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
+COPY e2m1_nvfp4_sm121.patch .
+RUN if [ -f e2m1_nvfp4_sm121.patch ]; then \
+        if patch -p1 --dry-run --reverse < e2m1_nvfp4_sm121.patch &>/dev/null; then \
+            echo "E2M1 NVFP4 SM121 patch already applied"; \
+        else \
+            echo "Applying E2M1 NVFP4 SM121 patch..." && \
+            patch -p1 < e2m1_nvfp4_sm121.patch; \
+        fi; \
+    fi
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
