@@ -123,6 +123,13 @@ RUN cd 3rdparty/cutlass && \
 COPY flashinfer_k64_sm120_v442.patch .
 RUN patch -p1 < flashinfer_k64_sm120_v442.patch
 
+# Enable GDC (Grid Dependency Control) for SM100+ in FlashInfer's JIT/AOT compilation.
+# Without this, PDL barriers (griddepcontrol.wait/launch_dependents) compile as no-ops,
+# causing race conditions between dependent MoE kernels → illegal instruction / NaN.
+# Reference: FlashInfer PR #2780
+RUN sed -i 's/common_nvcc_flags = \[/common_nvcc_flags = ["-DCUTLASS_ENABLE_GDC_FOR_SM100=1", /' \
+        flashinfer/jit/core.py
+
 ARG FLASHINFER_PRS=""
 
 RUN if [ -n "$FLASHINFER_PRS" ]; then \
