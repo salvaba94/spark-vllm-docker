@@ -39,4 +39,5 @@ command: |
   --reasoning-parser-plugin super_v3_reasoning_parser.py \
   --reasoning-parser super_v3 \
   --tensor-parallel-size {tensor_parallel} \
-  --enforce-eager
+  --enforce-eager \
+  --speculative-config '{"method": "nemotron_h_mtp", "num_speculative_tokens": 3}'
