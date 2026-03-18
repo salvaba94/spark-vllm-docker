@@ -24,6 +24,7 @@ VLLM_PRS=""
 FLASHINFER_PRS=""
 PRE_TRANSFORMERS=false
 FULL_LOG=false
+FORCE_REBUILD=false
 BUILD_JOBS="16"
 GPU_ARCH_LIST="12.1a"
 NETWORK_ARG=""
@@ -344,6 +345,7 @@ while [[ "$#" -gt 0 ]]; do
                exit 1
             fi
             ;;
+        --force-rebuild) FORCE_REBUILD=true; REBUILD_FLASHINFER=true; REBUILD_VLLM=true ;;
         --full-log) FULL_LOG=true ;;
         --no-build) NO_BUILD=true ;;
         --cleanup) CLEANUP_MODE=true ;;
@@ -499,6 +501,14 @@ if [ "$NO_BUILD" = false ]; then
         BUILD_END=$(date +%s)
         RUNNER_BUILD_TIME=$((BUILD_END - BUILD_START))
     else
+        # ----------------------------------------------------------
+        # Phase 0: Force-rebuild — delete existing wheels
+        # ----------------------------------------------------------
+        if [ "$FORCE_REBUILD" = true ]; then
+            echo "Force rebuild: deleting existing wheels..."
+            rm -f ./wheels/flashinfer*.whl ./wheels/vllm*.whl 2>/dev/null || true
+        fi
+
         # ----------------------------------------------------------
         # Phase 1: FlashInfer wheels
         # ----------------------------------------------------------
