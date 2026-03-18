@@ -1,24 +1,24 @@
 # Recipe: Qwen3.5-122B-A10B-NVFP4
-# Sehyo's NVFP4 quantization of Qwen3.5-122B
-# Optimized for SM120 Blackwell workstation GPUs (RTX PRO 6000, RTX 5090, DGX Spark)
-# Requires FlashInfer PR #2786 (K=64 CUTLASS kernel fix for SM120 SMEM)
+# NVFP4 quantization of Qwen3.5-122B MoE for DGX Spark / SM120 Blackwell
+# Same FlashInfer CUTLASS MoE path as Nemotron-3-Super
 
 recipe_version: "1"
 name: Qwen3.5-122B-A10B-NVFP4
-description: vLLM serving Qwen3.5-122B-A10B-NVFP4 with K=64 CUTLASS kernel fix for SM120
+description: vLLM serving Qwen3.5-122B-A10B-NVFP4 with FlashInfer CUTLASS MoE
 
 # HuggingFace model to download (optional, for --download-model)
-model: sehyo/Qwen3.5-122B-A10B-NVFP4
+model: scottgl/Qwen3.5-122B-A10B-MTP-NVFP4
 
 # Container image to use
-container: vllm-node-tf5
+container: vllm-nvfp4-k64-tf5
 
 build_args:
   - --tf5
   - --rebuild-flashinfer
 
-# Mods required for Qwen3.5
+# Mods — same as Nemotron plus Qwen3.5-specific fixes
 mods:
+  - mods/fix-e2m1-sm121
   - mods/fix-qwen3.5-autoround
   - mods/fix-qwen3.5-chat-template
 
@@ -28,26 +28,29 @@ defaults:
   host: 0.0.0.0
   tensor_parallel: 1
   gpu_memory_utilization: 0.85
-  max_model_len: 262144
+  max_model_len: 131072
   max_num_batched_tokens: 8192
 
-# Environment variables
+# Environment variables — match Nemotron
 env:
+  VLLM_NVFP4_GEMM_BACKEND: "cutlass"
+  VLLM_USE_FLASHINFER_MOE_FP4: 1
+  VLLM_FLASHINFER_MOE_BACKEND: "throughput"
+  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
   NCCL_P2P_DISABLE: "1"
   OMP_NUM_THREADS: "6"
   CUDA_DEVICE_MAX_CONNECTIONS: "32"
-  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
   VLLM_USE_FLASHINFER_SAMPLER: "0"
   VLLM_WORKER_MULTIPROC_METHOD: "spawn"
 
 # The vLLM serve command template
 command: |
-  vllm serve sehyo/Qwen3.5-122B-A10B-NVFP4 \
+  vllm serve scottgl/Qwen3.5-122B-A10B-MTP-NVFP4 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \
     --host {host} \
-    --enable-prefix-caching \
+    --no-enable-prefix-caching \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
@@ -55,4 +58,5 @@ command: |
     --trust-remote-code \
     --chat-template unsloth.jinja \
     -tp {tensor_parallel} \
-    --max-num-seqs 32
+    --max-num-seqs 32 \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":2}}'
