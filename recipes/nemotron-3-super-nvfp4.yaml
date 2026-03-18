@@ -40,4 +40,4 @@ command: |
   --reasoning-parser super_v3 \
   --tensor-parallel-size {tensor_parallel} \
   --enforce-eager \
-  --speculative-config '{"method": "nemotron_h_mtp", "num_speculative_tokens": 3}'
+  --speculative-config '{{"method": "nemotron_h_mtp", "num_speculative_tokens": 3}}'

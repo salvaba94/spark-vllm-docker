@@ -123,12 +123,15 @@ RUN cd 3rdparty/cutlass && \
 COPY flashinfer_k64_sm120_v442.patch .
 RUN patch -p1 < flashinfer_k64_sm120_v442.patch
 
-# Enable GDC (Grid Dependency Control) for SM100+ in FlashInfer's JIT/AOT compilation.
+# Enable GDC (Grid Dependency Control) for SM100+ in ALL FlashInfer compilation paths.
 # Without this, PDL barriers (griddepcontrol.wait/launch_dependents) compile as no-ops,
-# causing race conditions between dependent MoE kernels → illegal instruction / NaN.
+# causing race conditions between dependent MoE kernels → illegal instruction during
+# CUDA graph capture. The env var is picked up by build_cuda_cflags() in cpp_ext.py,
+# which covers both the JIT path (via core.py) AND the AOT path (fused_moe, fp4_quantization)
+# that uses CompilationContext.get_nvcc_flags_list() — a separate code path that the
+# previous core.py sed didn't reach.
 # Reference: FlashInfer PR #2780
-RUN sed -i 's/common_nvcc_flags = \[/common_nvcc_flags = ["-DCUTLASS_ENABLE_GDC_FOR_SM100=1", /' \
-        flashinfer/jit/core.py
+ENV FLASHINFER_EXTRA_CUDAFLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
 
 ARG FLASHINFER_PRS=""
 
@@ -348,6 +351,7 @@ ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
+ENV FLASHINFER_EXTRA_CUDAFLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 ENV PATH=$VLLM_BASE_DIR:$PATH
 
