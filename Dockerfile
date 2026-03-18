@@ -107,20 +107,21 @@ WORKDIR /workspace/flashinfer
 
 # Bump CUTLASS to v4.4.2 — fixes grouped GEMM SMEM stage count (PR #3092),
 # TMA descriptor alignment (#2905/#2906), and zero-stride TMA basis.
-# This eliminates the need for our K=64 TMA patch against v4.2.1.
 # Reference: https://github.com/NVIDIA/cutlass/issues/3096
 RUN cd 3rdparty/cutlass && \
     git fetch origin && \
     git checkout v4.4.2 && \
     cd ../..
 
-# Enable GDC (Grid Dependency Control) for SM100+ — without this flag,
-# PDL barriers compile as no-ops, causing race conditions and NaN in
-# concurrent MoE kernel launches. (FlashInfer PR #2780)
-# Note: CMAKE_CUDA_FLAGS is set for the FlashInfer build only (this stage).
-# It will NOT carry over to the vLLM build stage.
-ARG GDC_FLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
-ENV CMAKE_CUDA_FLAGS="${GDC_FLAGS}"
+# Apply K=64 SM120 block-scaled MoE GEMM patch (for CUTLASS v4.4.2)
+# Enables 7-11 pipeline stages vs 2 with K=128, giving ~2x decode throughput.
+# - EffBlk_SF clamping in sm120_blockscaled_mma_builder.inl
+# - K=64 tile shapes in are_tile_shapes_supported_sm120
+# - K=64 CTA shapes in generate_kernels.py
+# Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
+#            https://github.com/NVIDIA/cutlass/issues/3096
+COPY flashinfer_k64_sm120_v442.patch .
+RUN patch -p1 < flashinfer_k64_sm120_v442.patch
 
 ARG FLASHINFER_PRS=""
 
