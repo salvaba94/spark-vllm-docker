@@ -20,6 +20,7 @@ VLLM_PRS=""
 FLASHINFER_PRS=""
 PRE_TRANSFORMERS=false
 FULL_LOG=false
+FORCE_REBUILD=false
 BUILD_JOBS="16"
 GPU_ARCH_LIST="12.1a"
 NETWORK_ARG=""
@@ -245,6 +246,7 @@ usage() {
     echo "  --exp-mxfp4, --experimental-mxfp4 : Build with experimental native MXFP4 support"
     echo "  --apply-vllm-pr <pr-num>      : Apply a specific PR patch to vLLM source. Can be specified multiple times."
     echo "  --apply-flashinfer-pr <pr-num> : Apply a specific PR patch to FlashInfer source. Can be specified multiple times."
+    echo "  --force-rebuild               : Delete existing wheels and rebuild everything from source"
     echo "  --full-log                    : Enable full build logging (--progress=plain)"
     echo "  --no-build                    : Skip building, only copy image (requires --copy-to)"
     echo "  --network <network>           : Docker network to use during build"
@@ -320,6 +322,7 @@ while [[ "$#" -gt 0 ]]; do
                exit 1
             fi
             ;;
+        --force-rebuild) FORCE_REBUILD=true; REBUILD_FLASHINFER=true; REBUILD_VLLM=true ;;
         --full-log) FULL_LOG=true ;;
         --no-build) NO_BUILD=true ;;
         --network)
@@ -392,6 +395,14 @@ if [ "$NO_BUILD" = false ]; then
         BUILD_END=$(date +%s)
         RUNNER_BUILD_TIME=$((BUILD_END - BUILD_START))
     else
+        # ----------------------------------------------------------
+        # Phase 0: Force-rebuild — delete existing wheels
+        # ----------------------------------------------------------
+        if [ "$FORCE_REBUILD" = true ]; then
+            echo "Force rebuild: deleting existing wheels..."
+            rm -f ./wheels/flashinfer*.whl ./wheels/vllm*.whl 2>/dev/null || true
+        fi
+
         # ----------------------------------------------------------
         # Phase 1: FlashInfer wheels
         # ----------------------------------------------------------
