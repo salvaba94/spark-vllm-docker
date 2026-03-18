@@ -39,6 +39,27 @@ index a7d1959..6e9b94e 100644
                  continue
  
          otypes = [act_type]
+diff --git a/include/cute/atom/copy_traits_sm90_tma.hpp b/include/cute/atom/copy_traits_sm90_tma.hpp
+index 78ac598f..53663ea7 100644
+--- a/3rdparty/cutlass/include/cute/atom/copy_traits_sm90_tma.hpp
++++ b/3rdparty/cutlass/include/cute/atom/copy_traits_sm90_tma.hpp
+@@ -874,8 +874,14 @@ fill_tma_gmem_shape_stride(Tensor<GEngine,GLayout>   const& gtensor,           /
+     if constexpr (tma_i_rank == 1) {
+       // Trivial contribution of this gmem mode to this tma mode
+       auto ej = unwrap(get<i>(tma_gbasis_stride));
+-      gmem_prob_shape[i]  = basis_get(ej, gmem_shape);
+-      gmem_prob_stride[i] = basis_get(ej, gmem_stride);
++      if constexpr (cute::is_constant<0, decltype(ej)>::value) {
++        // Zero-stride basis: broadcast dimension (e.g. SFVectorSize with K=64 folding)
++        gmem_prob_shape[i]  = 1;
++        gmem_prob_stride[i] = 0;
++      } else {
++        gmem_prob_shape[i]  = basis_get(ej, gmem_shape);
++        gmem_prob_stride[i] = basis_get(ej, gmem_stride);
++      }
+     } else {
+       // Apply a recurrence to each gmem mode that contributes to this tma mode
+       for_each(get<i>(tma_gbasis_stride), [&](auto ej) {
 diff --git a/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl b/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl
 index 99b1323a..05936613 100755
 --- a/3rdparty/cutlass/include/cutlass/gemm/collective/builders/sm120_blockscaled_mma_builder.inl
