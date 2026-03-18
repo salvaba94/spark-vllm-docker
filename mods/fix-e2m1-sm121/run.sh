@@ -162,4 +162,26 @@ CEOF
     echo "  Installed RTLD_LAZY wrapper for fused_moe_120.so"
 fi
 
+# =========================================================================
+# FIX 5: Mamba SSM kernel — recognize SM121 as Blackwell-class
+#
+# mamba_mixer2.py uses is_device_capability_family(100) to set is_blackwell.
+# SM121 is family 120, not 100, so it falls through to a generic code path
+# with BLOCK_SIZE_M=4. With prefix caching (Mamba cache 'all' mode) and
+# dstate > 64, this causes illegal memory access in selective_state_update.
+# =========================================================================
+MAMBA_MIXER2=$(python3 -c "
+import vllm, os
+print(os.path.join(os.path.dirname(vllm.__file__), 'model_executor', 'layers', 'mamba', 'mamba_mixer2.py'))
+" 2>/dev/null)
+
+if [ -n "$MAMBA_MIXER2" ] && [ -f "$MAMBA_MIXER2" ]; then
+    if grep -q 'is_device_capability_family(100)' "$MAMBA_MIXER2"; then
+        sed -i 's/is_device_capability_family(100)/is_device_capability_family(100) or current_platform.is_device_capability_family(120)/' "$MAMBA_MIXER2"
+        echo "Patched mamba_mixer2.py: SM121 recognized as Blackwell for SSM kernel"
+    else
+        echo "mamba_mixer2.py: already patched or pattern not found"
+    fi
+fi
+
 echo "Done. FlashInfer will use software E2M1 conversion on SM121."

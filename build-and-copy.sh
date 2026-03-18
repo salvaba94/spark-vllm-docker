@@ -22,7 +22,7 @@ PRE_TRANSFORMERS=false
 FULL_LOG=false
 FORCE_REBUILD=false
 BUILD_JOBS="16"
-GPU_ARCH_LIST="12.1a"
+GPU_ARCH_LIST="12.0a"
 NETWORK_ARG=""
 WHEELS_REPO="eugr/spark-vllm-docker"
 FLASHINFER_RELEASE_TAG="prebuilt-flashinfer-current"
@@ -372,8 +372,12 @@ if [ "$FULL_LOG" = true ]; then
     COMMON_BUILD_FLAGS+=("--progress=plain")
 fi
 COMMON_BUILD_FLAGS+=("--build-arg" "BUILD_JOBS=$BUILD_JOBS")
+# vLLM needs 12.0a for FP4 kernel compilation (ENABLE_NVFP4_SM120).
+# FlashInfer needs 12.1a for SM121 E2M1 software fallback (via fix-e2m1-sm121 mod).
+# SM120 code runs on SM121 via binary compat, but FlashInfer's JIT uses this
+# env var at runtime to select the right compilation target.
 COMMON_BUILD_FLAGS+=("--build-arg" "TORCH_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
-COMMON_BUILD_FLAGS+=("--build-arg" "FLASHINFER_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
+COMMON_BUILD_FLAGS+=("--build-arg" "FLASHINFER_CUDA_ARCH_LIST=12.1a")
 if [ -n "$NETWORK_ARG" ]; then
     COMMON_BUILD_FLAGS+=("--network" "$NETWORK_ARG")
 fi

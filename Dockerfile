@@ -63,7 +63,7 @@ ENV CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 WORKDIR $VLLM_BASE_DIR
 
 # 2. Set Environment Variables
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
@@ -195,7 +195,7 @@ COPY --from=flashinfer-builder /workspace/wheels /
 # =========================================================
 FROM base AS vllm-builder
 
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
 
@@ -258,6 +258,12 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
+
+# Add SM121 to vLLM's CUDA_SUPPORTED_ARCHS so the build emits sm_121a code.
+# Without this, vLLM's cmake/utils.cmake maps 12.1a → 12.0 (nearest supported),
+# and the E2M1 software fallback (#if __CUDA_ARCH__ == 1210) never fires.
+RUN sed -i 's/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0")/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0;12.1")/' CMakeLists.txt && \
+    sed -i 's/set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")/set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0;12.1")/' CMakeLists.txt
 
 # Apply E2M1 software conversion for SM121 (GB10) - enables CUDA graphs with NVFP4
 # SM121 lacks cvt.rn.satfinite.e2m1x2.f32 PTX; this adds a software fallback
@@ -346,7 +352,7 @@ RUN --mount=type=bind,source=wheels,target=/workspace/wheels \
     fi
 
 # Setup environment for runtime
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}

@@ -21,6 +21,7 @@ defaults:
   gpu_memory_utilization: 0.7
   max_model_len: 262144
   max_num_seqs: 10
+  max_num_batched_tokens: 16384
 
 command: |
   vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
@@ -30,7 +31,9 @@ command: |
   --gpu-memory-utilization {gpu_memory_utilization} \
   --max-model-len {max_model_len} \
   --max-num-seqs {max_num_seqs} \
-  --no-enable-prefix-caching \
+  --enable-prefix-caching \
+  --mamba-cache-mode align \
+  --max-num-batched-tokens {max_num_batched_tokens} \
   --host {host} \
   --port {port} \
   --enable-auto-tool-choice \
