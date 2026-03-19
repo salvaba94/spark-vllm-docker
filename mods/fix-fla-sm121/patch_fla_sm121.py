@@ -1,19 +1,16 @@
 #!/usr/bin/env python3
 """Patch FLA ops for SM121 (Blackwell desktop) optimization.
 
-SM121 was misclassified as Hopper (is_nvidia_hopper = True) because the
-check used capability[0] >= 9 instead of == 9. This restricted the Triton
-autotune search space to Hopper-optimized configs (fewer warps, smaller blocks).
+SM121 is detected as is_nvidia_hopper=True (capability >= 9) which restricts
+NUM_WARPS to [2, 4]. We cannot safely change is_nvidia_hopper to False because
+other code paths depend on it (TMA, prefill warmup).
 
-Fixes:
-1. is_nvidia_hopper: True only for SM90 (Hopper), not SM12x (Blackwell desktop)
-2. is_tma_supported: False for SM12x (no TMA on desktop Blackwell)
-3. BKV_LIST: Include 128 for SM121 (99KB SMEM is sufficient)
+Instead, we directly patch the decode-critical chunk_o.py to add 8-warp
+configs to the autotune space while keeping is_nvidia_hopper unchanged.
 
-Measured improvement: 1.83x faster decode on GDN layers (TPOT 64ms → 35ms).
+Also fix is_tma_supported: SM12x does NOT have TMA (SM100+ datacenter only).
 """
 import os
-import sys
 
 SITE = "/usr/local/lib/python3.12/dist-packages"
 
@@ -35,46 +32,39 @@ def patch_file(path, old, new, label):
 
 
 # =========================================================================
-# 1. Fix is_nvidia_hopper and is_tma_supported in utils.py
+# 1. Fix is_tma_supported: SM12x has no TMA
 # =========================================================================
 utils_path = os.path.join(SITE, "vllm/model_executor/layers/fla/ops/utils.py")
 print(f"Patching: {utils_path}")
 
-# Fix is_nvidia_hopper: SM90 only
-patch_file(
-    utils_path,
-    'is_nvidia_hopper = is_nvidia and (\n'
-    '    "NVIDIA H" in torch.cuda.get_device_name(0)\n'
-    '    or torch.cuda.get_device_capability()[0] >= 9\n'
-    ')',
-    'is_nvidia_hopper = is_nvidia and (\n'
-    '    "NVIDIA H" in torch.cuda.get_device_name(0)\n'
-    '    or torch.cuda.get_device_capability()[0] == 9\n'
-    ')',
-    "is_nvidia_hopper (SM90 only)",
-)
-
-# Fix is_tma_supported: exclude SM12x
-patch_file(
-    utils_path,
-    'is_tma_supported = (is_nvidia and torch.cuda.get_device_capability(0)[0] >= 9) and (',
-    'is_tma_supported = (is_nvidia and 9 <= torch.cuda.get_device_capability(0)[0] < 12) and (',
-    "is_tma_supported (exclude SM12x)",
-)
+with open(utils_path) as f:
+    src = f.read()
+if "is_tma_supported" in src and "< 12" not in src:
+    src = src.replace(
+        "torch.cuda.get_device_capability(0)[0] >= 9) and (",
+        "9 <= torch.cuda.get_device_capability(0)[0] < 12) and (",
+        1,
+    )
+    with open(utils_path, "w") as f:
+        f.write(src)
+    print("  is_tma_supported (exclude SM12x): applied")
+else:
+    print("  is_tma_supported: already applied or not found")
 
 
 # =========================================================================
-# 2. Expand BKV_LIST in chunk_o.py
+# 2. Add 8-warp configs to chunk_o.py autotune (decode-critical kernel)
 # =========================================================================
 chunk_o_path = os.path.join(SITE, "vllm/model_executor/layers/fla/ops/chunk_o.py")
 print(f"Patching: {chunk_o_path}")
 
-# SM121 has 99KB SMEM — enough for BKV=128 in many configs
+# The Hopper restriction limits NUM_WARPS to [2, 4].
+# We override it directly in chunk_o.py to add 8 warps.
 patch_file(
     chunk_o_path,
-    'BKV_LIST = [64, 128] if check_shared_mem() else [32, 64]',
-    'BKV_LIST = [64, 128] if check_shared_mem() else [32, 64, 128]',
-    "BKV_LIST expand to include 128",
+    'NUM_WARPS = [2, 4] if is_nvidia_hopper else [2, 4, 8]',
+    'NUM_WARPS = [2, 4, 8]  # SM121: always include 8 warps',
+    "NUM_WARPS always include 8",
 )
 
 print("\nFLA SM121 optimizations applied.")
