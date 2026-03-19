@@ -7,7 +7,7 @@ name: Qwen3.5-122B-A10B-NVFP4
 description: vLLM serving Qwen3.5-122B-A10B-NVFP4 with FlashInfer CUTLASS MoE
 
 # HuggingFace model to download (optional, for --download-model)
-model: scottgl/Qwen3.5-122B-A10B-MTP-NVFP4
+model: Sehyo/Qwen3.5-122B-A10B-NVFP4
 
 # Container image to use
 container: vllm-nvfp4-k64-tf5
@@ -45,7 +45,7 @@ env:
 
 # The vLLM serve command template
 command: |
-  vllm serve scottgl/Qwen3.5-122B-A10B-MTP-NVFP4 \
+  vllm serve Sehyo/Qwen3.5-122B-A10B-NVFP4 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \
