@@ -12,7 +12,6 @@ solo_only: false
 mods:
   - mods/nemotron-super
   - mods/fix-e2m1-sm121
-  - mods/fix-fla-sm121
 
 container: vllm-node
 defaults:
