@@ -1,0 +1,46 @@
+# Recipe: Qwen3.5-122B-A10B int4 AutoRound
+# Intel AutoRound int4 — GDN layers quantized to int4 (unlike NVFP4 which keeps them bf16)
+
+recipe_version: "1"
+name: Qwen3.5-122B-A10B-int4-AutoRound
+description: vLLM serving Qwen3.5-122B int4 AutoRound
+
+model: Intel/Qwen3.5-122B-A10B-int4-AutoRound
+
+container: vllm-nvfp4-k64-tf5
+
+mods:
+  - mods/fix-e2m1-sm121
+  - mods/fix-fla-sm121
+  - mods/fix-qwen3.5-autoround
+  - mods/fix-qwen3.5-chat-template
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.85
+  max_model_len: 131072
+  max_num_batched_tokens: 8192
+
+env:
+  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+  NCCL_P2P_DISABLE: "1"
+  OMP_NUM_THREADS: "6"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+
+command: |
+  vllm serve Intel/Qwen3.5-122B-A10B-int4-AutoRound \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --port {port} \
+    --host {host} \
+    --no-enable-prefix-caching \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --trust-remote-code \
+    --chat-template unsloth.jinja \
+    -tp {tensor_parallel} \
+    --max-num-seqs 64 \
+    --attention-backend flashinfer

@@ -19,6 +19,7 @@ build_args:
 # Mods — same as Nemotron plus Qwen3.5-specific fixes
 mods:
   - mods/fix-e2m1-sm121
+  - mods/fix-fla-sm121
   - mods/fix-qwen3.5-autoround
   - mods/fix-qwen3.5-chat-template
 
@@ -58,5 +59,6 @@ command: |
     --trust-remote-code \
     --chat-template unsloth.jinja \
     -tp {tensor_parallel} \
-    --max-num-seqs 32 \
-    --speculative-config '{{"method":"mtp","num_speculative_tokens":2}}'
+    --max-num-seqs 64 \
+    --attention-backend flashinfer \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":3}}'

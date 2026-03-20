@@ -5,23 +5,27 @@ name: Nemotron-3-Super-NVFP4-CUTLASS-Optimized
 description: vLLM serving Nemotron-3-Super-120B using CUTLASS kernels
 
 model: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
-container: vllm-node
+container: vllm-nvfp4-k64-tf5
 cluster_only: false
 solo_only: false
 
 mods:
   - mods/nemotron-super
   - mods/fix-e2m1-sm121
-
-container: vllm-node
+  - mods/fix-fla-sm121
 defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 1
-  gpu_memory_utilization: 0.7
+  gpu_memory_utilization: 0.85
   max_model_len: 262144
-  max_num_seqs: 10
   max_num_batched_tokens: 16384
+env:
+  NCCL_P2P_DISABLE: "1"
+  OMP_NUM_THREADS: "6"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
 
 command: |
   vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
@@ -30,7 +34,7 @@ command: |
   --trust-remote-code \
   --gpu-memory-utilization {gpu_memory_utilization} \
   --max-model-len {max_model_len} \
-  --max-num-seqs {max_num_seqs} \
+  --max-num-seqs 64 \
   --enable-prefix-caching \
   --mamba-cache-mode align \
   --max-num-batched-tokens {max_num_batched_tokens} \
@@ -43,4 +47,4 @@ command: |
   --reasoning-parser super_v3 \
   --tensor-parallel-size {tensor_parallel} \
   --enforce-eager \
-  --speculative-config '{{"method": "nemotron_h_mtp", "num_speculative_tokens": 2}}'
+  --speculative-config '{{"method": "nemotron_h_mtp", "num_speculative_tokens": 3}}'

@@ -105,15 +105,16 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 
 WORKDIR /workspace/flashinfer
 
-# Bump CUTLASS to v4.4.2 — fixes grouped GEMM SMEM stage count (PR #3092),
+# Pin CUTLASS to v4.4.2 — fixes grouped GEMM SMEM stage count (PR #3092),
 # TMA descriptor alignment (#2905/#2906), and zero-stride TMA basis.
+# FlashInfer PR #2798 merged this, but we pin explicitly to be safe.
 # Reference: https://github.com/NVIDIA/cutlass/issues/3096
 RUN cd 3rdparty/cutlass && \
     git fetch origin && \
     git checkout v4.4.2 && \
     cd ../..
 
-# Apply K=64 SM120 block-scaled MoE GEMM patch (for CUTLASS v4.4.2)
+# Apply K=64 SM120 block-scaled MoE GEMM patch (PR #2786 still open)
 # Enables 7-11 pipeline stages vs 2 with K=128, giving ~2x decode throughput.
 # - EffBlk_SF clamping in sm120_blockscaled_mma_builder.inl
 # - K=64 tile shapes in are_tile_shapes_supported_sm120
