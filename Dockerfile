@@ -144,29 +144,10 @@ RUN if [ -n "$FLASHINFER_PRS" ]; then \
         done; \
     fi
 
-# Apply E2M1 SM121 fix: remove SM121 from CUDA_PTX_FP4FP6_CVT_ENABLED
-# SM121 (GB10) lacks cvt.rn.satfinite.e2m1x2.f32 PTX instruction
-# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
-COPY flashinfer_e2m1_sm121.patch .
-RUN if [ -f flashinfer_e2m1_sm121.patch ]; then \
-        if patch -p1 --dry-run --reverse < flashinfer_e2m1_sm121.patch &>/dev/null; then \
-            echo "E2M1 SM121 CUTLASS patch already applied"; \
-        else \
-            echo "Applying E2M1 SM121 CUTLASS patch..." && \
-            patch -p1 < flashinfer_e2m1_sm121.patch; \
-        fi; \
-    fi
-
-# Fix TRT-LLM quantization_utils.cuh for SM121: add software E2M1 conversion
-# fallback ONLY in the low-level fp32_vec_to_e2m1 functions.
-# IMPORTANT: Do NOT globally exclude SM121 from all >= 1000 guards — the
-# higher-level wrapper functions (cvt_warp_fp16_to_fp4, etc.) must be allowed
-# to enter the >= 1000 path on SM121. They do generic float math and call
-# fp32_vec_to_e2m1 which has the software fallback. Excluding SM121 from
-# the wrappers causes them to return 0 with uninitialized scale factors → NaN.
-# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
-COPY fix_quantization_utils_sm121.py .
-RUN python3 fix_quantization_utils_sm121.py
+# E2M1 software fallback patches REMOVED — native cvt.rn.satfinite.e2m1x2.f32
+# PTX instruction works on SM12x when compiled with correct arch flags (sm_121a).
+# The cmake fix below ensures __CUDA_ARCH_FAMILY_SPECIFIC__ is defined.
+# See: vllm-project/vllm#37725
 
 # Apply patch to avoid re-downloading existing cubins
 COPY flashinfer_cache.patch .
@@ -260,24 +241,12 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
 
-# Add SM121 to vLLM's CUDA_SUPPORTED_ARCHS so the build emits sm_121a code.
-# Without this, vLLM's cmake/utils.cmake maps 12.1a → 12.0 (nearest supported),
-# and the E2M1 software fallback (#if __CUDA_ARCH__ == 1210) never fires.
-RUN sed -i 's/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0")/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0;12.1")/' CMakeLists.txt && \
-    sed -i 's/set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")/set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0;12.1")/' CMakeLists.txt
-
-# Apply E2M1 software conversion for SM121 (GB10) - enables CUDA graphs with NVFP4
-# SM121 lacks cvt.rn.satfinite.e2m1x2.f32 PTX; this adds a software fallback
-# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
-COPY e2m1_nvfp4_sm121.patch .
-RUN if [ -f e2m1_nvfp4_sm121.patch ]; then \
-        if patch -p1 --dry-run --reverse < e2m1_nvfp4_sm121.patch &>/dev/null; then \
-            echo "E2M1 NVFP4 SM121 patch already applied"; \
-        else \
-            echo "Applying E2M1 NVFP4 SM121 patch..." && \
-            patch -p1 < e2m1_nvfp4_sm121.patch; \
-        fi; \
-    fi
+# Fix cmake to preserve arch suffix (a/f) and add SM121 to supported archs.
+# Without this, cmake compiles as sm_120 instead of sm_121a, leaving
+# __CUDA_ARCH_FAMILY_SPECIFIC__ undefined → disables native E2M1 PTX.
+# See: vllm-project/vllm#37725
+COPY vllm_cmake_arch_suffix.patch .
+RUN patch -p1 < vllm_cmake_arch_suffix.patch
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
