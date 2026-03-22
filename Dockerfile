@@ -284,24 +284,12 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
 # RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
 
-# Add SM121 to vLLM's CUDA_SUPPORTED_ARCHS so the build emits sm_121a code.
-# Without this, vLLM's cmake/utils.cmake maps 12.1a → 12.0 (nearest supported),
-# and the E2M1 software fallback (#if __CUDA_ARCH__ == 1210) never fires.
-RUN sed -i 's/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0")/set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0;12.1")/' CMakeLists.txt && \
-    sed -i 's/set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")/set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0;12.1")/' CMakeLists.txt
-
-# Apply E2M1 software conversion for SM121 (GB10) - enables CUDA graphs with NVFP4
-# SM121 lacks cvt.rn.satfinite.e2m1x2.f32 PTX; this adds a software fallback
-# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
-COPY e2m1_nvfp4_sm121.patch .
-RUN if [ -f e2m1_nvfp4_sm121.patch ]; then \
-        if patch -p1 --dry-run --reverse < e2m1_nvfp4_sm121.patch &>/dev/null; then \
-            echo "E2M1 NVFP4 SM121 patch already applied"; \
-        else \
-            echo "Applying E2M1 NVFP4 SM121 patch..." && \
-            patch -p1 < e2m1_nvfp4_sm121.patch; \
-        fi; \
-    fi
+# Fix cmake to preserve arch suffix (a/f) and add SM121 to supported archs.
+# Without this, cmake compiles as sm_120 instead of sm_121a, leaving
+# __CUDA_ARCH_FAMILY_SPECIFIC__ undefined → disables native E2M1 PTX.
+# See: vllm-project/vllm#37725
+COPY vllm_cmake_arch_suffix.patch .
+RUN patch -p1 < vllm_cmake_arch_suffix.patch
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
