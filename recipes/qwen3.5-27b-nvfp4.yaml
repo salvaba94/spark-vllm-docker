@@ -1,34 +1,35 @@
-# Recipe: Qwen3.5-35B-A3B-NVFP4 (test)
-# Full optimization: FLA SM121, MTP n=3, tool calling, flashinfer attention
-# Matches enhancements from 122B and Nemotron-3-Super recipes
+# Recipe: Qwen3.5-27B-NVFP4
+# NVFP4 quantization of Qwen3.5-27B dense model for DGX Spark / SM120 Blackwell
+# Sehyo quant preserves linear attention layers at full precision
 
 recipe_version: "1"
-name: Qwen3.5-35B-A3B-NVFP4-test
-description: Qwen3.5-35B NVFP4 with all optimizations (FLA, MTP, tool calling)
+name: Qwen3.5-27B-NVFP4
+description: vLLM serving Qwen3.5-27B-NVFP4 (dense, Sehyo quant)
 
-model: Sehyo/Qwen3.5-35B-A3B-NVFP4
+# HuggingFace model to download (optional, for --download-model)
+model: Sehyo/Qwen3.5-27B-NVFP4
 
+# Container image to use
 container: vllm-nvfp4-k64-tf5
 
-# Mods — match 122B recipe
+# Mods — E2M1 + FLA fixes, chat template (no autoround — Sehyo NVFP4)
 mods:
   - mods/fix-e2m1-sm121
   - mods/fix-fla-sm121
   - mods/fix-qwen3.5-chat-template
 
+# Default settings (can be overridden via CLI)
 defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 1
   gpu_memory_utilization: 0.85
-  max_model_len: 32768
+  max_model_len: 131072
   max_num_batched_tokens: 8192
 
-# Environment variables — match 122B/Nemotron
+# Environment variables — match other Sehyo recipes
 env:
   VLLM_NVFP4_GEMM_BACKEND: "cutlass"
-  VLLM_USE_FLASHINFER_MOE_FP4: 1
-  VLLM_FLASHINFER_MOE_BACKEND: "throughput"
   PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
   NCCL_P2P_DISABLE: "1"
   OMP_NUM_THREADS: "6"
@@ -36,8 +37,9 @@ env:
   VLLM_USE_FLASHINFER_SAMPLER: "0"
   VLLM_WORKER_MULTIPROC_METHOD: "spawn"
 
+# The vLLM serve command template
 command: |
-  vllm serve Sehyo/Qwen3.5-35B-A3B-NVFP4 \
+  vllm serve Sehyo/Qwen3.5-27B-NVFP4 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \
@@ -51,5 +53,4 @@ command: |
     --chat-template unsloth.jinja \
     -tp {tensor_parallel} \
     --max-num-seqs 64 \
-    --attention-backend flashinfer \
-    --speculative-config '{{"method":"mtp","num_speculative_tokens":3}}'
+    --attention-backend flashinfer
