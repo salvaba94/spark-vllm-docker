@@ -21,6 +21,8 @@ defaults:
   max_model_len: 262144
   max_num_batched_tokens: 16384
 env:
+  VLLM_USE_FLASHINFER_MOE_FP4: 1
+  VLLM_FLASHINFER_MOE_BACKEND: "throughput"
   NCCL_P2P_DISABLE: "1"
   OMP_NUM_THREADS: "6"
   CUDA_DEVICE_MAX_CONNECTIONS: "32"
@@ -30,7 +32,6 @@ env:
 command: |
   vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
   --kv-cache-dtype fp8 \
-  --moe-backend cutlass \
   --trust-remote-code \
   --gpu-memory-utilization {gpu_memory_utilization} \
   --max-model-len {max_model_len} \
@@ -46,5 +47,4 @@ command: |
   --reasoning-parser-plugin super_v3_reasoning_parser.py \
   --reasoning-parser super_v3 \
   --tensor-parallel-size {tensor_parallel} \
-  --enforce-eager \
   --speculative-config '{{"method": "nemotron_h_mtp", "num_speculative_tokens": 3}}'

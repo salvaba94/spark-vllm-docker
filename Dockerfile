@@ -75,7 +75,7 @@ FROM base AS flashinfer-builder
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
-ARG FLASHINFER_REF=main
+ARG FLASHINFER_REF=v0.6.6
 
 # --- CACHE BUSTER ---
 # Change this argument to force a re-download of FlashInfer
@@ -185,7 +185,7 @@ WORKDIR $VLLM_BASE_DIR
 ARG CACHEBUST_VLLM=1
 
 # Git reference (branch, tag, or SHA) to checkout
-ARG VLLM_REF=main
+ARG VLLM_REF=v0.18.0
 
 # Smart Git Clone (Fetch changes instead of full re-clone)
 RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
