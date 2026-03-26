@@ -954,6 +954,7 @@ Examples:
 
                 discovered_env = run_autodiscover()
                 if discovered_env and discovered_env.get("CLUSTER_NODES"):
+                    env = discovered_env  # use freshly loaded env from autodiscover
                     nodes = parse_nodes(discovered_env["CLUSTER_NODES"])
                     nodes_from_env = True
 
@@ -1000,8 +1001,17 @@ Examples:
         print(f"  2. Remove nodes from .env:  {sys.argv[0]} --show-env")
         return 1
 
-    # Determine copy targets for cluster deployments
-    copy_targets = worker_nodes if is_cluster else None
+    # Determine copy targets for build/model distribution.
+    # Prefer COPY_HOSTS from .env (may differ from CLUSTER_NODES in mesh mode),
+    # fall back to worker_nodes derived from CLUSTER_NODES.
+    if is_cluster:
+        copy_hosts_str = env.get("COPY_HOSTS")
+        if copy_hosts_str:
+            copy_targets = [h.strip() for h in copy_hosts_str.split(",") if h.strip()]
+        else:
+            copy_targets = worker_nodes
+    else:
+        copy_targets = None
 
     if args.dry_run:
         print("=== Dry Run ===")
