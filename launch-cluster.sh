@@ -991,8 +991,8 @@ exec_no_ray_cluster() {
 }
 
 if [[ "$ACTION" == "exec" ]]; then
-    # For --no-ray, trim (or error on) PEER_NODES based on declared parallelism
-    if [[ "$NO_RAY_MODE" == "true" ]]; then
+    # Trim (or error on) PEER_NODES based on declared parallelism, for any multi-node exec
+    if [[ "$SOLO_MODE" != "true" && ${#PEER_NODES[@]} -gt 0 ]]; then
         if [[ "$LAUNCH_SCRIPT_MODE" == "true" ]]; then
             cmd_text=$(cat "$LAUNCH_SCRIPT_PATH" 2>/dev/null || true)
         else
