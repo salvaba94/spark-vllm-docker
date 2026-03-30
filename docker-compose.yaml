@@ -1,0 +1,53 @@
+services:
+  vllm:
+    image: ${VLLM_IMAGE:-vllm-node}
+    restart: unless-stopped
+    network_mode: host
+    ipc: host
+    privileged: true
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${HOME}/.cache/vllm:/root/.cache/vllm
+      - ${HOME}/.cache/flashinfer:/root/.cache/flashinfer
+      - ${HOME}/.triton:/root/.triton
+      - .:/workspace:ro
+    environment:
+      - NCCL_IGNORE_CPU_AFFINITY=1
+      - HF_TOKEN=${HF_TOKEN:-}
+      - WORKSPACE_DIR=/root
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    entrypoint: ["python3", "/workspace/run-recipe.py"]
+    command: ["${RECIPE:-qwen3-coder-next-int4-autoround}", "--direct", "--solo"]
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${VLLM_PORT:-8000}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 360s
+    working_dir: /root
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - open-webui:/app/backend/data
+    environment:
+      - OPENAI_API_BASE_URL=http://localhost:${VLLM_PORT:-8000}/v1
+      - OPENAI_API_KEY=none
+      - PORT=${WEBUI_PORT:-3000}
+      - VECTOR_DB=qdrant
+      - QDRANT_URI=http://localhost:6333
+    depends_on:
+      vllm:
+        condition: service_healthy
+        restart: true
+
+volumes:
+  open-webui:
+  qdrant:

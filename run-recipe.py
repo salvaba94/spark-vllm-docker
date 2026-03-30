@@ -1197,6 +1197,14 @@ Examples:
         print(script_content)
         print("=== What would be executed ===")
         print()
+        if getattr(args, "direct", False):
+            mods = recipe.get("mods", [])
+            if mods:
+                print(f"1. Apply mods: {', '.join(mods)}")
+                print("2. Execute the above script directly (no Docker)")
+            else:
+                print("1. Execute the above script directly (no Docker)")
+            return 0
         print("1. The above script is saved to a temporary file")
         print()
         print("2. launch-cluster.sh is called with:")

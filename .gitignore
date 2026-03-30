@@ -1,2 +1,3 @@
 .env
+wheels/
 build-metadata.yaml
