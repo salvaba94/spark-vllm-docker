@@ -15,6 +15,7 @@ services:
       - NCCL_IGNORE_CPU_AFFINITY=1
       - HF_TOKEN=${HF_TOKEN:-}
       - WORKSPACE_DIR=/root
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
     deploy:
       resources:
         reservations:
@@ -39,10 +40,13 @@ services:
       - open-webui:/app/backend/data
     environment:
       - OPENAI_API_BASE_URL=http://localhost:${VLLM_PORT:-8000}/v1
-      - OPENAI_API_KEY=none
+      - OPENAI_API_KEY=${VLLM_API_KEY:-none}
       - PORT=${WEBUI_PORT:-3000}
-      - VECTOR_DB=qdrant
-      - QDRANT_URI=http://localhost:6333
+      - HOST=${WEBUI_HOST:-127.0.0.1}
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP:-false}
+      - WEBUI_AUTH_TRUSTED_EMAIL_HEADER=${WEBUI_AUTH_TRUSTED_EMAIL_HEADER:-}
+      - WEBUI_AUTH_TRUSTED_NAME_HEADER=${WEBUI_AUTH_TRUSTED_NAME_HEADER:-}
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-}
     depends_on:
       vllm:
         condition: service_healthy
@@ -50,4 +54,3 @@ services:
 
 volumes:
   open-webui:
-  qdrant:
