@@ -838,6 +838,7 @@ Examples:
     launch_group.add_argument("--mem-swap-limit-gb", type=int, dest="mem_swap_limit_gb", help="Memory+swap limit in GB (only with --non-privileged)")
     launch_group.add_argument("--pids-limit", type=int, dest="pids_limit", help="Process limit (only with --non-privileged, default: 4096)")
     launch_group.add_argument("--shm-size-gb", type=int, dest="shm_size_gb", help="Shared memory size in GB (only with --non-privileged, default: 64)")
+    launch_group.add_argument("--direct", action="store_true", help="Run vllm serve directly in the current environment without Docker (e.g. inside a container via Docker Compose)")
 
     # Cluster discovery options
     discover_group = parser.add_argument_group("Cluster discovery")
@@ -1090,8 +1091,8 @@ Examples:
     if args.build_only or args.download_only:
         return 0
     
-    # Check if image exists (if not using --setup)
-    if not args.dry_run and not args.setup and not check_image_exists(container):
+    # Check if image exists (if not using --setup or --direct)
+    if not args.dry_run and not args.setup and not getattr(args, "direct", False) and not check_image_exists(container):
         print(f"Container image '{container}' not found locally.")
         print()
         print("Options:")
@@ -1146,6 +1147,14 @@ Examples:
         print(script_content)
         print("=== What would be executed ===")
         print()
+        if getattr(args, "direct", False):
+            mods = recipe.get("mods", [])
+            if mods:
+                print(f"1. Apply mods: {', '.join(mods)}")
+                print("2. Execute the above script directly (no Docker)")
+            else:
+                print("1. Execute the above script directly (no Docker)")
+            return 0
         print("1. The above script is saved to a temporary file")
         print()
         print("2. launch-cluster.sh is called with:")
@@ -1201,7 +1210,25 @@ Examples:
     
     try:
         os.chmod(temp_script, 0o755)
-        
+
+        # --direct: run vllm serve in the current environment (no Docker)
+        if getattr(args, "direct", False):
+            print("=== Launching directly ===")
+            for mod in recipe.get("mods", []):
+                mod_path = SCRIPT_DIR / mod
+                run_sh = mod_path / "run.sh"
+                if run_sh.exists():
+                    print(f"Applying mod: {mod}")
+                    result = subprocess.run(["bash", str(run_sh)], cwd=str(mod_path))
+                    if result.returncode != 0:
+                        print(f"Error: Mod '{mod}' failed (exit {result.returncode})")
+                        return result.returncode
+                elif not mod_path.exists():
+                    print(f"Warning: Mod path not found: {mod_path}")
+            print()
+            result = subprocess.run(["bash", temp_script])
+            return result.returncode
+
         # Build launch-cluster.sh command
         cmd = [str(LAUNCH_SCRIPT), "-t", container]
         
