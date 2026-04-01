@@ -5,46 +5,42 @@ name: Nemotron-3-Super-NVFP4-CUTLASS-Optimized
 description: vLLM serving Nemotron-3-Super-120B using CUTLASS kernels
 
 model: nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4
-container: vllm-nvfp4-k64-tf5
+container: vllm-node
 cluster_only: false
 solo_only: false
 
-mods:
-  - mods/nemotron-super
-  - mods/fix-e2m1-sm121
-  - mods/fix-fla-sm121
+# mods: 
+#   - mods/nemotron-super
+
+env:
+  VLLM_FLASHINFER_ALLREDUCE_BACKEND: trtllm
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: 1
+
+container: vllm-node
 defaults:
   port: 8000
   host: 0.0.0.0
-  tensor_parallel: 1
-  gpu_memory_utilization: 0.80
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.7
   max_model_len: 262144
-  max_num_batched_tokens: 16384
-env:
-  VLLM_USE_FLASHINFER_MOE_FP4: 1
-  VLLM_FLASHINFER_MOE_BACKEND: "throughput"
-  NCCL_P2P_DISABLE: "1"
-  OMP_NUM_THREADS: "6"
-  CUDA_DEVICE_MAX_CONNECTIONS: "32"
-  VLLM_USE_FLASHINFER_SAMPLER: "0"
-  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  max_num_seqs: 10
 
 command: |
   vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
   --kv-cache-dtype fp8 \
+  --moe-backend cutlass \
   --trust-remote-code \
   --gpu-memory-utilization {gpu_memory_utilization} \
   --max-model-len {max_model_len} \
-  --max-num-seqs 64 \
+  --max-num-seqs {max_num_seqs} \
   --enable-prefix-caching \
-  --mamba-cache-mode align \
-  --max-num-batched-tokens {max_num_batched_tokens} \
   --host {host} \
   --port {port} \
   --enable-auto-tool-choice \
   --load-format fastsafetensors \
   --tool-call-parser qwen3_coder \
-  --reasoning-parser-plugin super_v3_reasoning_parser.py \
-  --reasoning-parser super_v3 \
+  --reasoning-parser nemotron_v3 \
+  --mamba_ssm_cache_dtype float32 \
   --tensor-parallel-size {tensor_parallel} \
-  --speculative-config '{{"method": "nemotron_h_mtp", "num_speculative_tokens": 3}}'
+  --attention-backend TRITON_ATTN \
+  --distributed-executor-backend ray

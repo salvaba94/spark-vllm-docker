@@ -439,6 +439,18 @@ check_cluster_running() {
         CLUSTER_WAS_RUNNING="true"
         return 0
     fi
+
+    # Remove any stopped containers with the same name to avoid name conflicts on relaunch
+    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+        echo "Removing stopped container '$CONTAINER_NAME' on head node ($HEAD_IP)..."
+        docker rm "$CONTAINER_NAME"
+    fi
+    for worker in "${PEER_NODES[@]}"; do
+        if ssh "$worker" "docker ps -a --format '{{.Names}}' | grep -q '^${CONTAINER_NAME}$'"; then
+            echo "Removing stopped container '$CONTAINER_NAME' on worker node ($worker)..."
+            ssh "$worker" "docker rm $CONTAINER_NAME"
+        fi
+    done
 }
 
 # Apply Mod Function

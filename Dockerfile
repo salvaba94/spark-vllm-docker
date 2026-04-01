@@ -121,8 +121,8 @@ RUN cd 3rdparty/cutlass && \
 # - K=64 CTA shapes in generate_kernels.py
 # Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
 #            https://github.com/NVIDIA/cutlass/issues/3096
-COPY flashinfer_k64_sm120_v442.patch .
-RUN patch -p1 < flashinfer_k64_sm120_v442.patch
+RUN --mount=type=bind,source=mods/mandatory/flashinfer_k64_sm120_v442.patch,target=/tmp/flashinfer_k64_sm120_v442.patch \
+    patch -p1 < /tmp/flashinfer_k64_sm120_v442.patch
 
 # Enable GDC (Grid Dependency Control) for SM100+ in ALL FlashInfer compilation paths.
 # Without this, PDL barriers (griddepcontrol.wait/launch_dependents) compile as no-ops,
@@ -150,11 +150,11 @@ RUN if [ -n "$FLASHINFER_PRS" ]; then \
 # See: vllm-project/vllm#37725
 
 # Apply patch to avoid re-downloading existing cubins
-COPY flashinfer_cache.patch .
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+RUN --mount=type=bind,source=mods/mandatory/flashinfer_cache.patch,target=/tmp/flashinfer_cache.patch \
+    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=cubins-cache,target=/workspace/flashinfer/flashinfer-cubin/flashinfer_cubin/cubins \
-    patch -p1 < flashinfer_cache.patch && \
+    patch -p1 < /tmp/flashinfer_cache.patch && \
     # flashinfer-python
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
     uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
@@ -231,11 +231,11 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 
 # Apply Patches
 # TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
-# COPY fastsafetensors.patch .
-# RUN if patch -p1 --dry-run --reverse < fastsafetensors.patch &>/dev/null; then \
+# RUN --mount=type=bind,source=mods/mandatory/fastsafetensors.patch,target=/tmp/fastsafetensors.patch \
+#     if patch -p1 --dry-run --reverse < /tmp/fastsafetensors.patch &>/dev/null; then \
 #         echo "PR #34180 is already applied"; \
 #     else \
-#         patch -p1 < fastsafetensors.patch; \
+#         patch -p1 < /tmp/fastsafetensors.patch; \
 #     fi
 # TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
 RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
@@ -254,8 +254,8 @@ RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pul
 # Without this, cmake compiles as sm_120 instead of sm_121a, leaving
 # __CUDA_ARCH_FAMILY_SPECIFIC__ undefined → disables native E2M1 PTX.
 # See: vllm-project/vllm#37725
-COPY vllm_cmake_arch_suffix.patch .
-RUN patch -p1 < vllm_cmake_arch_suffix.patch
+RUN --mount=type=bind,source=mods/mandatory/vllm_cmake_arch_suffix.patch,target=/tmp/vllm_cmake_arch_suffix.patch \
+    patch -p1 < /tmp/vllm_cmake_arch_suffix.patch
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
