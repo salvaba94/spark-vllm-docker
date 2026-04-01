@@ -14,8 +14,6 @@ ENV MAX_JOBS=${BUILD_JOBS}
 ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
 ENV NINJAFLAGS="-j${BUILD_JOBS}"
 ENV MAKEFLAGS="-j${BUILD_JOBS}"
-ENV DG_JIT_USE_NVRTC=1
-ENV USE_CUDNN=1
 
 # Set non-interactive frontend to prevent apt prompts
 ENV DEBIAN_FRONTEND=noninteractive
@@ -40,8 +38,8 @@ RUN apt update && \
     curl vim cmake build-essential ninja-build \
     libcudnn9-cuda-13 libcudnn9-dev-cuda-13 \
     python3-dev python3-pip git wget \
-    libibverbs1 libibverbs-dev rdma-core \
-    ccache devscripts debhelper fakeroot \
+    libnccl-dev libnccl2 libibverbs1 libibverbs-dev rdma-core \
+    ccache \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv
 
@@ -61,18 +59,13 @@ ENV CCACHE_COMPRESS=1
 ENV CMAKE_CXX_COMPILER_LAUNCHER=ccache
 ENV CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
-# 2. Set Environment Variables
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
-ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
-ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
-
 # Setup Workspace
 WORKDIR $VLLM_BASE_DIR
 
-# Build NCCL with mesh support (TODO: only do it if arch is 12.1) - artifacts will be in /workspace/nccl/build/pkg/deb
-RUN git clone -b dgxspark-3node-ring https://github.com/zyang-dev/nccl.git && \
-    cd nccl && make -j ${BUILD_JOBS} src.build NVCC_GENCODE="-gencode=arch=compute_121,code=sm_121" && \
-    make pkg.debian.build && apt install -y --no-install-recommends --allow-downgrades ./build/pkg/deb/*.deb
+# 2. Set Environment Variables
+ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
+ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
+ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 
 # =========================================================
 # STAGE 2: FlashInfer Builder
@@ -82,7 +75,7 @@ FROM base AS flashinfer-builder
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
-ARG FLASHINFER_REF=main
+ARG FLASHINFER_REF=v0.6.6
 
 # --- CACHE BUSTER ---
 # Change this argument to force a re-download of FlashInfer
@@ -112,32 +105,56 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
 
 WORKDIR /workspace/flashinfer
 
+# Pin CUTLASS to v4.4.2 — fixes grouped GEMM SMEM stage count (PR #3092),
+# TMA descriptor alignment (#2905/#2906), and zero-stride TMA basis.
+# FlashInfer PR #2798 merged this, but we pin explicitly to be safe.
+# Reference: https://github.com/NVIDIA/cutlass/issues/3096
+RUN cd 3rdparty/cutlass && \
+    git fetch origin && \
+    git checkout v4.4.2 && \
+    cd ../..
+
+# Apply K=64 SM120 block-scaled MoE GEMM patch (PR #2786 still open)
+# Enables 7-11 pipeline stages vs 2 with K=128, giving ~2x decode throughput.
+# - EffBlk_SF clamping in sm120_blockscaled_mma_builder.inl
+# - K=64 tile shapes in are_tile_shapes_supported_sm120
+# - K=64 CTA shapes in generate_kernels.py
+# Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
+#            https://github.com/NVIDIA/cutlass/issues/3096
+RUN --mount=type=bind,source=mods/mandatory/flashinfer_k64_sm120_v442.patch,target=/tmp/flashinfer_k64_sm120_v442.patch \
+    patch -p1 < /tmp/flashinfer_k64_sm120_v442.patch
+
+# Enable GDC (Grid Dependency Control) for SM100+ in ALL FlashInfer compilation paths.
+# Without this, PDL barriers (griddepcontrol.wait/launch_dependents) compile as no-ops,
+# causing race conditions between dependent MoE kernels → illegal instruction during
+# CUDA graph capture. The env var is picked up by build_cuda_cflags() in cpp_ext.py,
+# which covers both the JIT path (via core.py) AND the AOT path (fused_moe, fp4_quantization)
+# that uses CompilationContext.get_nvcc_flags_list() — a separate code path that the
+# previous core.py sed didn't reach.
+# Reference: FlashInfer PR #2780
+ENV FLASHINFER_EXTRA_CUDAFLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
+
 ARG FLASHINFER_PRS=""
 
 RUN if [ -n "$FLASHINFER_PRS" ]; then \
-        echo "Applying PRs: $FLASHINFER_PRS"; \
+        echo "Applying FlashInfer PRs: $FLASHINFER_PRS"; \
         for pr in $FLASHINFER_PRS; do \
-            echo "Fetching and applying PR #$pr..."; \
+            echo "Fetching and applying FlashInfer PR #$pr..."; \
             curl -fL "https://github.com/flashinfer-ai/flashinfer/pull/${pr}.diff" | git apply -v; \
         done; \
     fi
 
-# TEMPORARY patch for NVFP4 crash (PR 2913)
-RUN curl -fsL https://github.com/flashinfer-ai/flashinfer/pull/2913.diff -o pr2913.diff \
-    && if git apply --reverse --check pr2913.diff 2>/dev/null; then \
-         echo "PR #2913 already applied, skipping."; \
-       else \
-         echo "Applying FI PR #2913..."; \
-         git apply -v pr2913.diff; \
-       fi \
-    && rm pr2913.diff
+# E2M1 software fallback patches REMOVED — native cvt.rn.satfinite.e2m1x2.f32
+# PTX instruction works on SM12x when compiled with correct arch flags (sm_121a).
+# The cmake fix below ensures __CUDA_ARCH_FAMILY_SPECIFIC__ is defined.
+# See: vllm-project/vllm#37725
 
 # Apply patch to avoid re-downloading existing cubins
-COPY flashinfer_cache.patch .
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+RUN --mount=type=bind,source=mods/mandatory/flashinfer_cache.patch,target=/tmp/flashinfer_cache.patch \
+    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=cubins-cache,target=/workspace/flashinfer/flashinfer-cubin/flashinfer_cubin/cubins \
-    patch -p1 < flashinfer_cache.patch && \
+    patch -p1 < /tmp/flashinfer_cache.patch && \
     # flashinfer-python
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
     uv build --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
@@ -160,7 +177,7 @@ COPY --from=flashinfer-builder /workspace/wheels /
 # =========================================================
 FROM base AS vllm-builder
 
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
 
@@ -168,7 +185,7 @@ WORKDIR $VLLM_BASE_DIR
 ARG CACHEBUST_VLLM=1
 
 # Git reference (branch, tag, or SHA) to checkout
-ARG VLLM_REF=main
+ARG VLLM_REF=v0.18.0
 
 # Smart Git Clone (Fetch changes instead of full re-clone)
 RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
@@ -204,16 +221,6 @@ RUN if [ -n "$VLLM_PRS" ]; then \
         done; \
     fi
 
-# TEMPORARY PATCH for broken compilation
-# RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/38423.diff -o pr38423.diff \
-#     && if git apply --reverse --check pr38423.diff 2>/dev/null; then \
-#          echo "Patch already applied, skipping."; \
-#        else \
-#          echo "Applying patch..."; \
-#          git apply -v pr38423.diff; \
-#        fi \
-#     && rm pr38423.diff
-
 # Prepare build requirements
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     python3 use_existing_torch.py && \
@@ -224,15 +231,31 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 
 # Apply Patches
 # TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
-# COPY fastsafetensors.patch .
-# RUN if patch -p1 --dry-run --reverse < fastsafetensors.patch &>/dev/null; then \
+# RUN --mount=type=bind,source=mods/mandatory/fastsafetensors.patch,target=/tmp/fastsafetensors.patch \
+#     if patch -p1 --dry-run --reverse < /tmp/fastsafetensors.patch &>/dev/null; then \
 #         echo "PR #34180 is already applied"; \
 #     else \
-#         patch -p1 < fastsafetensors.patch; \
+#         patch -p1 < /tmp/fastsafetensors.patch; \
 #     fi
 # TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
-# RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
-# RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
+RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
+RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
+# TEMPORARY PATCH for broken NVFP4 quants
+RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/38126.diff -o pr38126.diff \
+    && if git apply --reverse --check pr38126.diff 2>/dev/null; then \
+         echo "Patch already applied, skipping."; \
+       else \
+         echo "Applying patch..."; \
+         git apply -v pr38126.diff; \
+       fi \
+    && rm pr38126.diff
+
+# Fix cmake to preserve arch suffix (a/f) and add SM121 to supported archs.
+# Without this, cmake compiles as sm_120 instead of sm_121a, leaving
+# __CUDA_ARCH_FAMILY_SPECIFIC__ undefined → disables native E2M1 PTX.
+# See: vllm-project/vllm#37725
+RUN --mount=type=bind,source=mods/mandatory/vllm_cmake_arch_suffix.patch,target=/tmp/vllm_cmake_arch_suffix.patch \
+    patch -p1 < /tmp/vllm_cmake_arch_suffix.patch
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
@@ -259,8 +282,6 @@ ENV MAX_JOBS=${BUILD_JOBS}
 ENV CMAKE_BUILD_PARALLEL_LEVEL=${BUILD_JOBS}
 ENV NINJAFLAGS="-j${BUILD_JOBS}"
 ENV MAKEFLAGS="-j${BUILD_JOBS}"
-ENV DG_JIT_USE_NVRTC=1
-ENV USE_CUDNN=1
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
@@ -273,16 +294,13 @@ ENV UV_SYSTEM_PYTHON=1
 ENV UV_BREAK_SYSTEM_PACKAGES=1
 ENV UV_LINK_MODE=copy
 
-# Mount additional packages from base builder image
 # Install runtime dependencies
-RUN --mount=type=bind,from=base,source=/workspace/vllm/nccl/build/pkg/deb,target=/workspace/nccl-pkg \
-    apt update && \
+RUN apt update && \
     apt install -y --no-install-recommends \
     python3 python3-pip python3-dev vim curl git wget \
     libcudnn9-cuda-13 \
-    libibverbs1 libibverbs-dev rdma-core \
+    libnccl-dev libnccl2 libibverbs1 libibverbs-dev rdma-core \
     libxcb1 \
-    && cd /workspace/nccl-pkg && apt install -y --no-install-recommends --allow-downgrades ./*.deb \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv
 
@@ -313,11 +331,12 @@ RUN --mount=type=bind,source=wheels,target=/workspace/wheels \
     fi
 
 # Setup environment for runtime
-ARG TORCH_CUDA_ARCH_LIST="12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
+ENV FLASHINFER_EXTRA_CUDAFLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 ENV PATH=$VLLM_BASE_DIR:$PATH
 
@@ -326,9 +345,5 @@ ENV PATH=$VLLM_BASE_DIR:$PATH
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install ray[default] fastsafetensors
 
-# Fix NCCL
-RUN rm /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2 && \
-    ln -s /usr/lib/aarch64-linux-gnu/libnccl.so.2 /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2
-    
 # Build metadata (generated by build-and-copy.sh)
 COPY build-metadata.yaml /workspace/build-metadata.yaml

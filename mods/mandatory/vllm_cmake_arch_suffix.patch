@@ -1,0 +1,42 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ddc9bca..4b0eb78 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -94,10 +94,10 @@ find_package(Torch REQUIRED)
+ # This check must happen after find_package(Torch) because that's when CMAKE_CUDA_COMPILER_VERSION gets defined
+ if(DEFINED CMAKE_CUDA_COMPILER_VERSION AND
+    CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.0)
+-  set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0")
++  set(CUDA_SUPPORTED_ARCHS "7.5;8.0;8.6;8.7;8.9;9.0;10.0;11.0;12.0;12.1")
+ elseif(DEFINED CMAKE_CUDA_COMPILER_VERSION AND
+    CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8)
+-  set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0")
++  set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0;10.0;10.1;12.0;12.1")
+ else()
+   set(CUDA_SUPPORTED_ARCHS "7.0;7.2;7.5;8.0;8.6;8.7;8.9;9.0")
+ endif()
+diff --git a/cmake/utils.cmake b/cmake/utils.cmake
+index bdb2ba7..fd3d7e0 100644
+--- a/cmake/utils.cmake
++++ b/cmake/utils.cmake
+@@ -173,8 +173,10 @@ print(candidates[0] if candidates else '')
+ endfunction()
+ 
+ # Macro for converting a `gencode` version number to a cmake version number.
++# Preserves architecture-specific suffixes (a/f) needed for correct
++# __CUDA_ARCH_FAMILY_SPECIFIC__ definition. E.g. "121a" -> "12.1a".
+ macro(string_to_ver OUT_VER IN_STR)
+-  string(REGEX REPLACE "\([0-9]+\)\([0-9]\)" "\\1.\\2" ${OUT_VER} ${IN_STR})
++  string(REGEX REPLACE "\([0-9]+\)\([0-9][af]?\)" "\\1.\\2" ${OUT_VER} ${IN_STR})
+ endmacro()
+ 
+ #
+@@ -211,7 +213,7 @@ endmacro()
+ function(extract_unique_cuda_archs_ascending OUT_ARCHES CUDA_ARCH_FLAGS)
+   set(_CUDA_ARCHES)
+   foreach(_ARCH ${CUDA_ARCH_FLAGS})
+-    string(REGEX MATCH "arch=compute_\([0-9]+a?\)" _COMPUTE ${_ARCH})
++    string(REGEX MATCH "arch=compute_\([0-9]+[af]?\)" _COMPUTE ${_ARCH})
+     if (_COMPUTE)
+       set(_COMPUTE ${CMAKE_MATCH_1})
+     endif()

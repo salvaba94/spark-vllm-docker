@@ -1,0 +1,61 @@
+# Recipe: Qwen3.5-27B-NVFP4
+# NVFP4 quantization of Qwen3.5-27B dense model for DGX Spark / SM120 Blackwell
+# Sehyo quant preserves linear attention layers at full precision
+
+recipe_version: "1"
+name: Qwen3.5-27B-NVFP4
+description: vLLM serving Qwen3.5-27B-NVFP4 (dense, Sehyo quant)
+
+# HuggingFace model to download (optional, for --download-model)
+model: Sehyo/Qwen3.5-27B-NVFP4
+
+# Container image to use
+container: vllm-nvfp4-k64-tf5
+
+build_args:
+  - --tf5
+  - --rebuild-flashinfer
+
+# Mods — same as Nemotron plus Qwen3.5-specific fixes
+mods:
+  - mods/fix-e2m1-sm121
+  - mods/fix-fla-sm121
+  - mods/fix-qwen3.5-chat-template
+
+# Default settings (can be overridden via CLI)
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  gpu_memory_utilization: 0.4
+  max_model_len: 262144
+  max_num_batched_tokens: 16384
+
+# Environment variables — match other Sehyo recipes
+env:
+  VLLM_NVFP4_GEMM_BACKEND: "cutlass"
+  PYTORCH_CUDA_ALLOC_CONF: "expandable_segments:True"
+  NCCL_P2P_DISABLE: "1"
+  OMP_NUM_THREADS: "6"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+
+# The vLLM serve command template
+command: |
+  vllm serve Sehyo/Qwen3.5-27B-NVFP4 \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --port {port} \
+    --host {host} \
+    --no-enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --trust-remote-code \
+    --chat-template unsloth.jinja \
+    -tp {tensor_parallel} \
+    --max-num-seqs 64 \
+    --attention-backend flashinfer \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":3}}'

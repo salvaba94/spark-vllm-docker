@@ -1,0 +1,33 @@
+# Recipe: MiniMax-M2.5-REAP-139B-NVFP4
+# lukealonso NVFP4 quant of Cerebras REAP-pruned MiniMax-M2.5 (256->154 experts)
+# ~80GB model, fits comfortably on Spark with room for KV cache.
+recipe_version: "1"
+name: MiniMax-M2.5-REAP-139B-NVFP4
+description: MiniMax-M2.5 REAP-pruned 139B MoE, NVFP4 quantized for DGX Spark
+
+model: lukealonso/MiniMax-M2.5-REAP-139B-A10B-NVFP4
+container: vllm-nvfp4-k64-tf5
+cluster_only: false
+solo_only: false
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.93
+  max_model_len: 65536
+  max_num_seqs: 10
+
+command: |
+  vllm serve lukealonso/MiniMax-M2.5-REAP-139B-A10B-NVFP4 \
+  --trust-remote-code \
+  --kv-cache-dtype fp8 \
+  --gpu-memory-utilization {gpu_memory_utilization} \
+  --max-model-len {max_model_len} \
+  --max-num-seqs {max_num_seqs} \
+  --enable-prefix-caching \
+  --host {host} \
+  --port {port} \
+  --load-format fastsafetensors \
+  --tensor-parallel-size {tensor_parallel} \
+  --enforce-eager
