@@ -4,10 +4,10 @@
 
 recipe_version: "1"
 name: Qwen3.5-27B-NVFP4
-description: vLLM serving Qwen3.5-27B-NVFP4 (dense, Sehyo quant)
+description: vLLM serving Qwen3.5-27B-NVFP4 (dense, mconcat quant of the distilled version)
 
 # HuggingFace model to download (optional, for --download-model)
-model: Sehyo/Qwen3.5-27B-NVFP4
+model: mconcat/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-NVFP4
 
 # Container image to use
 container: vllm-nvfp4-k64-tf5
@@ -40,14 +40,16 @@ env:
   CUDA_DEVICE_MAX_CONNECTIONS: "32"
   VLLM_USE_FLASHINFER_SAMPLER: "0"
   VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  TORCHINDUCTOR_AUTOGRAD_CACHE: "0"
 
 # The vLLM serve command template
 command: |
-  vllm serve Sehyo/Qwen3.5-27B-NVFP4 \
+  vllm serve mconcat/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-NVFP4 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \
     --host {host} \
+    --enable-prefix-caching \
     --no-enable-prefix-caching \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
@@ -58,4 +60,5 @@ command: |
     -tp {tensor_parallel} \
     --max-num-seqs 64 \
     --attention-backend flashinfer \
+    --kv-cache-dtype fp8_e4m3 \
     --speculative-config '{{"method":"mtp","num_speculative_tokens":3}}'

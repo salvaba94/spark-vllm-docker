@@ -56,13 +56,22 @@ patch_replace(
 # =========================================================================
 # 2. Fix is_tma_supported: SM12x desktop has no TMA
 #    Same >= 9 check. TMA is SM90+ datacenter (H100/B200), not GB10.
+#    Primary anchor matches the validated one-liner from PR #36325 / HF card.
+#    Fallback anchor matches older vLLM versions.
 # =========================================================================
-patch_replace(
+applied = patch_replace(
     utils_path,
-    "torch.cuda.get_device_capability(0)[0] >= 9) and (",
-    "9 <= torch.cuda.get_device_capability(0)[0] < 12) and (",
-    "is_tma_supported (exclude SM12x)",
+    "is_nvidia and torch.cuda.get_device_capability(0)[0] >= 9",
+    "is_nvidia and 9 <= torch.cuda.get_device_capability(0)[0] < 12",
+    "is_tma_supported (PR #36325 anchor, exclude SM12x)",
 )
+if not applied:
+    patch_replace(
+        utils_path,
+        "torch.cuda.get_device_capability(0)[0] >= 9) and (",
+        "9 <= torch.cuda.get_device_capability(0)[0] < 12) and (",
+        "is_tma_supported (fallback anchor, exclude SM12x)",
+    )
 
 # =========================================================================
 # 3. Override BKV_LIST in chunk_o.py to include 128

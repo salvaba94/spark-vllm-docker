@@ -1,0 +1,44 @@
+# Recipe: Qwen3.5-27B-INT4-Autoround
+# Qwen3.5-27B dense model in Intel INT4-Autoround quantization
+
+recipe_version: "1"
+name: Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled
+description: vLLM serving Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled
+
+# HuggingFace model to download (optional, for --download-model)
+model: Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled
+
+# Container image to use
+container: vllm-node-tf5
+
+build_args:
+  - --tf5
+
+# Mod required to fix ROPE syntax error and chat template
+mods:
+  - mods/fix-qwen3.5-autoround
+  - mods/fix-qwen3.5-chat-template
+
+# Default settings (can be overridden via CLI)
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.8
+  max_model_len: 96000
+
+# Environment variables
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: 1
+
+# The vLLM serve command template
+command: |
+  vllm serve Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled \
+    --max-model-len {max_model_len} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --port {port} \
+    --host {host} \
+    --load-format fastsafetensors \
+    --reasoning-parser qwen3 \
+    --language-model-only \
+    --trust-remote-code

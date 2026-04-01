@@ -376,6 +376,43 @@ def download_model(model: str, copy_to: list[str] | None = None) -> bool:
     return result.returncode == 0
 
 
+def _reshard_model(model: str, max_shard_gb: float) -> None:
+    """Reshard oversized safetensors shards using reshard-model.py.
+
+    Resolves the HF snapshot directory from model ID and delegates to
+    reshard-model.py, which splits any shard above max_shard_gb in-place.
+    No-ops if all shards are already within the threshold.
+    """
+    reshard_script = SCRIPT_DIR / "reshard-model.py"
+    if not reshard_script.exists():
+        print(f"Warning: reshard-model.py not found, skipping reshard")
+        return
+
+    # Resolve snapshot path
+    cache_name = f"models--{model.replace('/', '--')}"
+    cache_path = Path.home() / ".cache" / "huggingface" / "hub" / cache_name
+    snaps = sorted((cache_path / "snapshots").iterdir()) if (cache_path / "snapshots").exists() else []
+    if not snaps:
+        print(f"Warning: Cannot find snapshot for '{model}', skipping reshard")
+        return
+    snapshot = snaps[-1]
+
+    # Check if any shard actually needs resharding before invoking
+    max_bytes = int(max_shard_gb * (1 << 30))
+    oversized = [s for s in snapshot.glob("*.safetensors") if s.stat().st_size > max_bytes]
+    if not oversized:
+        print(f"Reshard: all shards ≤ {max_shard_gb} GB, skipping")
+        return
+
+    print(f"=== Resharding Model ({len(oversized)} shard(s) > {max_shard_gb} GB) ===")
+    result = subprocess.run(
+        [sys.executable, str(reshard_script), str(snapshot),
+         "--max-shard-size", str(max_shard_gb)]
+    )
+    if result.returncode != 0:
+        print("Warning: reshard-model.py exited with errors")
+
+
 def check_model_exists(model: str) -> bool:
     """
     Check if a model exists in the HuggingFace cache.
@@ -1094,6 +1131,7 @@ Examples:
             return 0
 
     # --- Download Phase ---
+    reshard_max_gb = recipe.get("reshard_max_shard_gb")
     if model and (args.download_only or args.setup or args.force_download):
         if args.dry_run:
             model_exists = check_model_exists(model)
@@ -1103,6 +1141,8 @@ Examples:
                     print(f"  Would copy to: {', '.join(copy_targets)}")
             else:
                 print(f"Model '{model}' already exists in cache.")
+            if reshard_max_gb:
+                print(f"Would reshard shards > {reshard_max_gb} GB (reshard_max_shard_gb)")
             print()
         else:
             model_exists = check_model_exists(model)
