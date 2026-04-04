@@ -144,10 +144,15 @@ RUN if [ -n "$FLASHINFER_PRS" ]; then \
         done; \
     fi
 
-# E2M1 software fallback patches REMOVED — native cvt.rn.satfinite.e2m1x2.f32
-# PTX instruction works on SM12x when compiled with correct arch flags (sm_121a).
-# The cmake fix below ensures __CUDA_ARCH_FAMILY_SPECIFIC__ is defined.
-# See: vllm-project/vllm#37725
+# TEMPORARY patch for flashinfer autotune and other improvements (PR 2927) - MERGED 4/3
+# RUN curl -fsL https://github.com/flashinfer-ai/flashinfer/pull/2927.diff -o pr2927.diff \
+#     && if git apply --reverse --check pr2927.diff 2>/dev/null; then \
+#          echo "PR #2927 already applied, skipping."; \
+#        else \
+#          echo "Applying FI PR #2927..."; \
+#          git apply -v pr2927.diff; \
+#        fi \
+#     && rm pr2927.diff
 
 # Apply patch to avoid re-downloading existing cubins
 RUN --mount=type=bind,source=mods/mandatory/flashinfer_cache.patch,target=/tmp/flashinfer_cache.patch \
@@ -220,6 +225,26 @@ RUN if [ -n "$VLLM_PRS" ]; then \
             curl -fL "https://github.com/vllm-project/vllm/pull/${pr}.diff" | git apply -v; \
         done; \
     fi
+
+# TEMPORARY PATCH for broken FP8 kernels - https://github.com/vllm-project/vllm/pull/35568
+RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/35568.diff -o pr35568.diff \
+    && if git apply --reverse --check pr35568.diff 2>/dev/null; then \
+         echo "PR 35568 already applied, skipping."; \
+       else \
+         echo "Applying PR 35568..."; \
+         git apply -v pr35568.diff; \
+       fi \
+    && rm pr35568.diff
+
+# TEMPORARY PATCH for broken compilation - https://github.com/vllm-project/vllm/pull/38919
+RUN curl -fsL https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/38919.diff -o pr38919.diff \
+    && if git apply --reverse --check pr38919.diff 2>/dev/null; then \
+         echo "PR 38919 already applied, skipping."; \
+       else \
+         echo "Applying PR 38919..."; \
+         git apply -v pr38919.diff; \
+       fi \
+    && rm pr38919.diff
 
 # Prepare build requirements
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
