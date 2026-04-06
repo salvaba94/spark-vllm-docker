@@ -151,16 +151,6 @@ RUN if [ -n "$FLASHINFER_PRS" ]; then \
         done; \
     fi
 
-# TEMPORARY patch for flashinfer autotune and other improvements (PR 2927) - MERGED 4/3
-# RUN curl -fsL https://github.com/flashinfer-ai/flashinfer/pull/2927.diff -o pr2927.diff \
-#     && if git apply --reverse --check pr2927.diff 2>/dev/null; then \
-#          echo "PR #2927 already applied, skipping."; \
-#        else \
-#          echo "Applying FI PR #2927..."; \
-#          git apply -v pr2927.diff; \
-#        fi \
-#     && rm pr2927.diff
-
 # Fix TRT-LLM quantization_utils.cuh for SM121: add software E2M1 conversion
 # fallback ONLY in the low-level fp32_vec_to_e2m1 functions.
 # IMPORTANT: Do NOT globally exclude SM121 from all >= 1000 guards — the
@@ -271,18 +261,6 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     sed -i '/^triton\b/d' requirements/test.txt && \
     sed -i '/^fastsafetensors\b/d' requirements/test.txt && \
     uv pip install -r requirements/build.txt
-
-# Apply Patches
-# TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
-# RUN --mount=type=bind,source=mods/mandatory/fastsafetensors.patch,target=/tmp/fastsafetensors.patch \
-#     if patch -p1 --dry-run --reverse < /tmp/fastsafetensors.patch &>/dev/null; then \
-#         echo "PR #34180 is already applied"; \
-#     else \
-#         patch -p1 < /tmp/fastsafetensors.patch; \
-#     fi
-# TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
-# RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
-# RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
 
 # Fix cmake to preserve arch suffix (a/f) and add SM121 to supported archs.
 # Without this, cmake compiles as sm_120 instead of sm_121a, leaving
