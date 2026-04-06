@@ -889,6 +889,13 @@ Examples:
         dest="shm_size_gb",
         help="Shared memory size in GB (only with --non-privileged, default: 64)",
     )
+    launch_group.add_argument(
+        "--direct",
+        action="store_true",
+        dest="direct",
+        help="Run vLLM directly inside the current container (no Docker, no launch-cluster.sh). "
+             "Used when run-recipe.py is the container entrypoint (e.g. docker compose).",
+    )
 
     # Config file option
     parser.add_argument(
@@ -1165,8 +1172,8 @@ Examples:
     if args.build_only or args.download_only:
         return 0
 
-    # Check if image exists (if not using --setup)
-    if not args.dry_run and not args.setup and not check_image_exists(container):
+    # Check if image exists (if not using --setup or --direct)
+    if not args.dry_run and not args.setup and not args.direct and not check_image_exists(container):
         print(f"Container image '{container}' not found locally.")
         print()
         print("Options:")
@@ -1302,6 +1309,28 @@ Examples:
 
     try:
         os.chmod(temp_script, 0o755)
+
+        # --direct: already inside the target container — apply mods and exec directly
+        if args.direct:
+            print("=== Direct mode: running inside container ===")
+            for mod in recipe.get("mods", []):
+                mod_path = SCRIPT_DIR / mod
+                run_sh = mod_path / "run.sh"
+                if not run_sh.exists():
+                    print(f"Warning: Mod run.sh not found, skipping: {run_sh}")
+                    continue
+                print(f"Applying mod: {mod_path.name}")
+                result = subprocess.run(
+                    ["bash", "-c", f"export WORKSPACE_DIR={shlex.quote(str(SCRIPT_DIR))} && cd {shlex.quote(str(mod_path))} && chmod +x run.sh && ./run.sh"],
+                )
+                if result.returncode != 0:
+                    print(f"Error: Mod '{mod_path.name}' failed (exit {result.returncode})")
+                    return result.returncode
+            print()
+            print("=== Launching vLLM ===")
+            os.execv("/bin/bash", ["/bin/bash", temp_script])
+            # os.execv replaces the process; the line below is never reached
+            return 0  # unreachable
 
         # Build launch-cluster.sh command
         cmd = [str(LAUNCH_SCRIPT), "-t", container]
