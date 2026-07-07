@@ -317,6 +317,24 @@ RUN set -eux; \
         done; \
     fi
 
+# TEMPORARY PATCH: vLLM PR #43957 added a generic embedding-width guard for
+# EAGLE3, but Gemma4 MTP intentionally replaces its draft embedding with the
+# target backbone embedding before pre_projection. Without sharing, Gemma4 MTP
+# concatenates 1024-wide draft embeddings with 2816-wide backbone hidden states
+# and crashes in a 5632-wide pre_projection. Keep the guard scoped to EAGLE-style
+# draft models until upstream fixes https://github.com/vllm-project/vllm/issues/47794.
+RUN patch -p1 <<'PATCH'
+diff --git a/vllm/v1/spec_decode/llm_base_proposer.py b/vllm/v1/spec_decode/llm_base_proposer.py
+--- a/vllm/v1/spec_decode/llm_base_proposer.py
++++ b/vllm/v1/spec_decode/llm_base_proposer.py
+@@ -1472,4 +1472,4 @@ class SpecDecodeBaseProposer:
+-            if share_embeddings:
++            if share_embeddings and hasattr(self.model, "has_own_embed_tokens"):
+                 draft_embed = self.model.model.embed_tokens
+                 # Only share when both models use the same embedding width.
+                 # Guard with isinstance so non-Tensor weights (e.g. in tests)
+PATCH
+
 # TEMPORARY PATCH (source build only): vLLM PR #43008 selects cooperative_topk
 # for all SM90+ devices. On DGX Spark / SM12.x this fails at launch with
 # "cooperative_topk launch failed: invalid argument". Keep the cooperative
