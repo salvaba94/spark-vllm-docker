@@ -41,4 +41,3 @@ command: |
     --load-format fastsafetensors \
     --enable-prefix-caching \
     --max-model-len {max_model_len}
-

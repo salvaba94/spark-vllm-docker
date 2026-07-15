@@ -2,3 +2,4 @@
 wheels/*
 !wheels/.gitkeep
 build-metadata.yaml
+.DS_STORE
