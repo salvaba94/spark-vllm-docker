@@ -1,0 +1,40 @@
+recipe_version: "1"
+name: Gemma4-26B-A4B-NVFP4-DFlash-Solo
+description: Gemma4 26B NVFP4 with the z-lab Gemma4 DFlash drafter
+model: nvidia/Gemma-4-26B-A4B-NVFP4
+solo_only: true
+container: vllm-node
+
+build_args:
+  - --apply-vllm-pr
+  - "41703"
+  - --apply-preset-vllm-prs
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.7
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  num_speculative_tokens: 15
+
+env: {}
+
+command: |
+  vllm serve nvidia/Gemma-4-26B-A4B-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --load-format instanttensor \
+    --kv-cache-dtype fp8 \
+    --attention-backend triton_attn \
+    --enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --tool-call-parser gemma4 \
+    --reasoning-parser gemma4 \
+    --trust-remote-code \
+    --speculative-config '{{"method":"dflash","model":"z-lab/gemma-4-26B-A4B-it-DFlash","num_speculative_tokens":{num_speculative_tokens},"attention_backend":"flash_attn"}}'

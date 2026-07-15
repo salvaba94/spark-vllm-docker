@@ -971,6 +971,27 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install ray[default] fastsafetensors instanttensor \
         --override /tmp/torch-override.txt
 
+# Install vLLM-Omni (multimodal generation extension for vLLM)
+# Ref: https://docs.vllm.ai/projects/vllm-omni/en/latest/getting_started/installation/gpu/#build-wheel-from-source
+ARG VLLM_OMNI_REF=main
+ARG CACHEBUST_VLLM_OMNI=1
+RUN --mount=type=cache,id=git-vllm-omni,target=/git-cache/vllm-omni \
+    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+    if [ -d /git-cache/vllm-omni/.git ] && [ -d /git-cache/vllm-omni/.git/objects ]; then \
+        echo "Cache hit: Fetching vLLM-Omni updates..." && \
+        cp -a /git-cache/vllm-omni /workspace/vllm-omni && \
+        cd /workspace/vllm-omni && \
+        git fetch origin && git fetch origin --tags --force; \
+    else \
+        echo "Cache miss: Cloning vLLM-Omni from scratch..." && \
+        rm -rf /git-cache/vllm-omni/* /git-cache/vllm-omni/.* 2>/dev/null || true && \
+        git clone https://github.com/vllm-project/vllm-omni.git /workspace/vllm-omni && \
+        cp -a /workspace/vllm-omni/. /git-cache/vllm-omni/; \
+    fi && \
+    cd /workspace/vllm-omni && \
+    (git checkout --detach origin/${VLLM_OMNI_REF} 2>/dev/null || git checkout ${VLLM_OMNI_REF}) && \
+    uv pip install .
+
 # Fix NCCL
 RUN rm /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2 && \
     ln -s /usr/lib/aarch64-linux-gnu/libnccl.so.2 /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2

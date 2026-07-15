@@ -32,17 +32,14 @@ defaults:
 
 # Environment variables
 env:
-  VLLM_SLEEP_WHEN_IDLE: '0'
   VLLM_ALLOW_LONG_MAX_MODEL_LEN: '1'
-  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: '1'
-  SAFETENSORS_FAST_GPU: '1'
   VLLM_MARLIN_USE_ATOMIC_ADD: '1'
-  VLLM_MOE_FORCE_MARLIN: '1'
 
 
 # The vLLM serve command template
 command: |
   vllm serve Qwen/Qwen3.5-27B-FP8 \
+    --served-model-name Qwen3.5-27B-FP8 \
     --host {host} \
     --port {port} \
     --max-model-len {max_model_len} \
@@ -57,9 +54,11 @@ command: |
     --enable-prefix-caching \
     --chat-template unsloth.jinja \
     -tp {tensor_parallel} \
-    --distributed-executor-backend ray \
     --optimization-level 3 \
     --performance-mode throughput \
     --mamba-cache-mode align \
+    --max_num_seqs 10 \
+    --max_cudagraph_capture_size 10 \
+    --mamba_ssm_cache_dtype float16 \
     --speculative-config '{{"method":"mtp","num_speculative_tokens":2}}' \
     --override-generation-config '{{"temperature": 0.60, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repetition_penalty": 1.0, "max_tokens": 16384}}'

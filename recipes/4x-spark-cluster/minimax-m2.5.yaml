@@ -32,6 +32,7 @@ env:
 # The vLLM serve command template
 command: |
   vllm serve MiniMaxAI/MiniMax-M2.5 \
+    --served-model-name MiniMax-M2.5 \
       --trust-remote-code \
       --port {port} \
       --host {host} \

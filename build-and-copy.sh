@@ -28,6 +28,8 @@ VLLM_PRS=""
 APPLY_PRESET_VLLM_PRS=false
 FLASHINFER_PRS=""
 # Deprecated --tf5 aliases are kept for tag compatibility only; they no longer alter dependency resolution.
+VLLM_OMNI_REF="main"
+REBUILD_VLLM_OMNI=false
 PRE_TRANSFORMERS=false
 FULL_LOG=false
 FORCE_REBUILD=false
@@ -411,6 +413,8 @@ usage() {
     echo "  --apply-vllm-pr <pr-num>      : Apply a specific PR patch to vLLM source. Can be specified multiple times."
     echo "  --apply-preset-vllm-prs       : Apply preset vLLM PRs even with --vllm-ref or --apply-vllm-pr."
     echo "  --apply-flashinfer-pr <pr-num>: Apply a specific PR patch to FlashInfer source. Can be specified multiple times."
+    echo "  --vllm-omni-ref <ref>         : vLLM-Omni branch, tag or SHA to install (default: 'main')"
+    echo "  --rebuild-vllm-omni           : Force re-clone and reinstall of vLLM-Omni (bust the git cache)"
     echo "  --full-log                    : Enable full build logging (--progress=plain)"
     echo "  --no-build                    : Skip building, only copy image (requires --copy-to)"
     echo "  --network <network>           : Docker network to use during build"
@@ -479,6 +483,8 @@ while [[ "$#" -gt 0 ]]; do
                exit 1
             fi
             ;;
+        --vllm-omni-ref) VLLM_OMNI_REF="$2"; REBUILD_VLLM_OMNI=true; shift ;;
+        --rebuild-vllm-omni) REBUILD_VLLM_OMNI=true ;;
         --force-rebuild) FORCE_REBUILD=true; REBUILD_FLASHINFER=true; REBUILD_VLLM=true ;;
         --full-log) FULL_LOG=true ;;
         --no-build) NO_BUILD=true ;;
@@ -682,7 +688,12 @@ if [ "$NO_BUILD" = false ]; then
         generate_build_metadata Dockerfile.mxfp4 "unknown" "$MXFP4_VLLM_SHA" "$MXFP4_FLASHINFER_SHA" \
             "mxfp4-pinned" "false" "true" ""
 
-        CMD=("docker" "build" "-t" "$IMAGE_TAG" "${COMMON_BUILD_FLAGS[@]}" "-f" "Dockerfile.mxfp4" ".")
+        CMD=("docker" "build" "-t" "$IMAGE_TAG" "${COMMON_BUILD_FLAGS[@]}"
+            "--build-arg" "VLLM_OMNI_REF=$VLLM_OMNI_REF")
+        if [ "$REBUILD_VLLM_OMNI" = true ]; then
+            CMD+=("--build-arg" "CACHEBUST_VLLM_OMNI=$(date +%s)")
+        fi
+        CMD+=("-f" "Dockerfile.mxfp4" ".")
         echo "Building image with command: ${CMD[*]}"
         BUILD_START=$(date +%s)
         "${CMD[@]}"
@@ -866,6 +877,16 @@ if [ "$NO_BUILD" = false ]; then
         RUNNER_CMD=("docker" "build"
             "-t" "$IMAGE_TAG"
             "${COMMON_BUILD_FLAGS[@]}")
+
+        if [ "$PRE_TRANSFORMERS" = true ]; then
+            echo "Using transformers>=5.0.0..."
+            RUNNER_CMD+=("--build-arg" "PRE_TRANSFORMERS=1")
+        fi
+
+        RUNNER_CMD+=("--build-arg" "VLLM_OMNI_REF=$VLLM_OMNI_REF")
+        if [ "$REBUILD_VLLM_OMNI" = true ]; then
+            RUNNER_CMD+=("--build-arg" "CACHEBUST_VLLM_OMNI=$(date +%s)")
+        fi
 
         RUNNER_CMD+=(".")
 

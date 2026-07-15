@@ -1,0 +1,50 @@
+recipe_version: "1"
+name: Qwen3.5-27B-NVFP4-DFlash-Solo
+description: Dense Qwen3.5 27B NVFP4 with the z-lab Qwen3.5-27B DFlash drafter
+model: Sehyo/Qwen3.5-27B-NVFP4
+solo_only: true
+container: vllm-nvfp4-k64-tf5
+
+build_args:
+  - --tf5
+  - --rebuild-flashinfer
+  - --apply-vllm-pr
+  - "40898"
+  - --apply-preset-vllm-prs
+
+mods:
+  - mods/fix-e2m1-sm121
+  - mods/fix-fla-sm121
+  - mods/fix-qwen3.5-chat-template
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.6
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+  num_speculative_tokens: 15
+
+env:
+  VLLM_NVFP4_GEMM_BACKEND: cutlass
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+
+command: |
+  vllm serve Sehyo/Qwen3.5-27B-NVFP4 \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --kv-cache-dtype fp8 \
+    --attention-backend flashinfer \
+    --trust-remote-code \
+    --enable-chunked-prefill \
+    --enable-auto-tool-choice \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_coder \
+    --speculative-config '{{"method":"dflash","model":"z-lab/Qwen3.5-27B-DFlash","num_speculative_tokens":{num_speculative_tokens},"attention_backend":"flash_attn"}}'

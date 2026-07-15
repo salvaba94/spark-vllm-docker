@@ -1,0 +1,35 @@
+# Spark Arena single-node winner: 130.45 decode tokens/s at tg128 @ d16384 (c2).
+
+recipe_version: "1"
+name: Gemma-4-E2B-FP8-Arena-Solo
+description: Spark Arena single-node FP8 recipe for google/gemma-4-E2B-it
+model: google/gemma-4-E2B-it
+
+solo_only: true
+container: vllm-node
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.7
+  max_model_len: 131072
+  max_num_batched_tokens: 8192
+
+env: {}
+
+command: |
+  vllm serve google/gemma-4-E2B-it \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --load-format safetensors \
+    --quantization fp8 \
+    --kv-cache-dtype fp8 \
+    --enable-prefix-caching \
+    --enable-auto-tool-choice \
+    --tool-call-parser gemma4 \
+    --reasoning-parser gemma4

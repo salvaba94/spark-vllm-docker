@@ -37,6 +37,7 @@ env:
 # The vLLM serve command template
 command: |
   vllm serve Qwen/Qwen3.5-397B-A17B-FP8 \
+    --served-model-name Qwen3.5-397B-A17B-FP8 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \

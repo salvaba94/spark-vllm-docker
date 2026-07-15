@@ -31,6 +31,7 @@ env: {}
 # The vLLM serve command template
 command: |
   vllm serve QuantTrio/MiniMax-M2-AWQ \
+    --served-model-name MiniMax-M2-AWQ \
       --port {port} \
       --host {host} \
       --gpu-memory-utilization {gpu_memory_utilization} \

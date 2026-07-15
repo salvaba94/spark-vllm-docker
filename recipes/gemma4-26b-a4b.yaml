@@ -33,7 +33,8 @@ env: {}
 
 # The vLLM serve command template
 command: |
-  vllm serve google/gemma-4-26B-A4B-it  \
+  vllm serve google/gemma-4-26B-A4B-it \
+    --served-model-name gemma-4-26B-A4B-it \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \

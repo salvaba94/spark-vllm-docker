@@ -1,22 +1,21 @@
-# Recipe: Qwen3.6-35B-A3B-NVFP4-Marlin
-# Qwen3.6-35B-A3B model in NVIDIA NVFP4 format with Marlin MoE backend.
+# Qwen3.6 NVFP4 with the Qwen DFlash speculative draft model.
 
 recipe_version: "1"
-name: Qwen3.6-35B-A3B-NVFP4-Arena-Solo
-description: Spark Arena single-node winner serving nvidia/Qwen3.6-35B-A3B-NVFP4
-
-# HuggingFace model to download (optional, for --download-model)
+name: Qwen3.6-35B-A3B-NVFP4-DFlash-Arena-Solo
+description: Single-node Qwen3.6 NVFP4 with z-lab Qwen DFlash speculative decoding
 model: nvidia/Qwen3.6-35B-A3B-NVFP4
 
-# Container image to use
+solo_only: true
 container: vllm-node
 
-solo_only: true
+build_args:
+  - --apply-vllm-pr
+  - "40898"
+  - --apply-preset-vllm-prs
 
 mods:
   - mods/fix-qwen3.6-chat-template
 
-# Default settings (can be overridden via CLI)
 defaults:
   port: 8000
   host: 0.0.0.0
@@ -25,12 +24,11 @@ defaults:
   max_model_len: 262144
   max_num_seqs: 4
   max_num_batched_tokens: 32768
+  num_speculative_tokens: 15
 
-# Environment variables
 env:
-  VLLM_MARLIN_USE_ATOMIC_ADD: 1
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
 
-# The vLLM serve command template
 command: |
   vllm serve nvidia/Qwen3.6-35B-A3B-NVFP4 \
     --host {host} \
@@ -38,7 +36,7 @@ command: |
     --tensor-parallel-size {tensor_parallel} \
     --trust-remote-code \
     --kv-cache-dtype fp8 \
-    --attention-backend flashinfer \
+    --attention-backend flash_attn \
     --moe-backend marlin \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --max-model-len {max_model_len} \
@@ -47,7 +45,7 @@ command: |
     --enable-chunked-prefill \
     --async-scheduling \
     --enable-prefix-caching \
-    --speculative-config '{{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}}' \
+    --speculative-config '{{"method":"dflash","model":"z-lab/Qwen3.6-35B-A3B-DFlash","num_speculative_tokens":{num_speculative_tokens}}}' \
     --load-format fastsafetensors \
     --reasoning-parser qwen3 \
     --tool-call-parser qwen3_xml \

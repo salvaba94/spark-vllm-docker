@@ -1,0 +1,48 @@
+recipe_version: "1"
+name: Qwen3.6-27B-Huihui-NVFP4-DFlash-Solo
+description: Dense Qwen3.6 27B NVFP4 with the z-lab Qwen3.6-27B DFlash drafter
+model: sakamakismile/Huihui-Qwen3.6-27B-abliterated-NVFP4-MTP
+solo_only: true
+container: vllm-node
+
+build_args:
+  - --apply-vllm-pr
+  - "40898"
+  - --apply-preset-vllm-prs
+
+mods:
+  - mods/fix-qwen3.6-chat-template
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.5
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  max_num_seqs: 3
+  num_speculative_tokens: 15
+
+env:
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+
+command: |
+  vllm serve sakamakismile/Huihui-Qwen3.6-27B-abliterated-NVFP4-MTP \
+    --host {host} \
+    --port {port} \
+    --served-model-name qwen3.6-27b \
+    --tensor-parallel-size {tensor_parallel} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --kv-cache-dtype fp8 \
+    --attention-backend flash_attn \
+    --trust-remote-code \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --enable-auto-tool-choice \
+    --reasoning-parser qwen3 \
+    --tool-call-parser qwen3_xml \
+    --default-chat-template-kwargs '{{"preserve_thinking":true}}' \
+    --speculative-config '{{"method":"dflash","model":"z-lab/Qwen3.6-27B-DFlash","num_speculative_tokens":{num_speculative_tokens}}}'

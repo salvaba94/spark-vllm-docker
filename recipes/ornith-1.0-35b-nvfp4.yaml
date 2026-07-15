@@ -1,0 +1,45 @@
+# Spark Arena fastest qualifying Ornith recipe: 51.20 decode tokens/s at tg128 @ d16384 (c2).
+
+recipe_version: "1"
+name: Ornith-1.0-35B-NVFP4-Arena-Solo
+description: Spark Arena single-node NVFP4 recipe for sakamakismile/Ornith-1.0-35B-NVFP4
+model: sakamakismile/Ornith-1.0-35B-NVFP4
+
+solo_only: true
+container: vllm-node
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.6
+  max_model_len: 262144
+  max_num_batched_tokens: 65536
+  max_num_seqs: 4
+
+env:
+  PROMETHEUS_METRICS_ENABLED: "false"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "1"
+
+command: |
+  vllm serve sakamakismile/Ornith-1.0-35B-NVFP4 \
+    --served-model-name ornith-1.0-35b \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --trust-remote-code \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --kv-cache-dtype fp8 \
+    --load-format fastsafetensors \
+    --enable-flashinfer-autotune \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --performance-mode throughput

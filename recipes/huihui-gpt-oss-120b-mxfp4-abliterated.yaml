@@ -34,6 +34,7 @@ env:
 # Uses MXFP4 quantization for memory efficiency
 command: |
   vllm serve batsclamp/Huihui-gpt-oss-120b-mxfp4-abliterated \
+    --served-model-name Huihui-gpt-oss-120b-mxfp4-abliterated \
       --tool-call-parser openai \
       --reasoning-parser openai_gptoss \
       --enable-auto-tool-choice \

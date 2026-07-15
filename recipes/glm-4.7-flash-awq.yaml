@@ -37,7 +37,6 @@ defaults:
   max_model_len: 202752
   max_num_batched_tokens: 4096
   max_num_seqs: 64
-  served_model_name: glm-4.7-flash
 
 # Environment variables to set in the container
 env:
@@ -48,10 +47,10 @@ env:
 # In cluster mode, --distributed-executor-backend ray and -tp 2 are added
 command: |
   vllm serve cyankiwi/GLM-4.7-Flash-AWQ-4bit \
+      --served-model-name GLM-4.7-Flash-AWQ-4bit \
       --tool-call-parser glm47 \
       --reasoning-parser glm45 \
       --enable-auto-tool-choice \
-      --served-model-name {served_model_name} \
       --max-model-len {max_model_len} \
       --max-num-batched-tokens {max_num_batched_tokens} \
       --max-num-seqs {max_num_seqs} \

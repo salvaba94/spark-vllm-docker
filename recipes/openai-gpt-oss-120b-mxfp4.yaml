@@ -37,6 +37,7 @@ env:
 # Uses MXFP4 quantization for memory efficiency
 command: |
   vllm serve openai/gpt-oss-120b \
+    --served-model-name gpt-oss-120b \
       --tool-call-parser openai \
       --reasoning-parser openai_gptoss \
       --enable-auto-tool-choice \

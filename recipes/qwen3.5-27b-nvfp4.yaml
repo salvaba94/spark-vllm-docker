@@ -44,6 +44,7 @@ env:
 # The vLLM serve command template
 command: |
   vllm serve Sehyo/Qwen3.5-27B-NVFP4 \
+    --served-model-name Qwen3.5-27B-NVFP4 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \

@@ -35,6 +35,7 @@ env:
 # The vLLM serve command template
 command: |
   vllm serve Intel/Qwen3.5-35B-A3B-int4-AutoRound \
+    --served-model-name Qwen3.5-35B-A3B-int4-AutoRound \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \

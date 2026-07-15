@@ -49,6 +49,7 @@ env:
 # The vLLM serve command template
 command: |
   vllm serve mistralai/Mistral-Small-4-119B-2603-NVFP4 \
+    --served-model-name Mistral-Small-4-119B-2603-NVFP4 \
     --max-model-len {max_model_len} \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --port {port} \
