@@ -1,5 +1,5 @@
 # Recipe: Inkling-Small-NVFP4
-# Inkling Small with NVFP4 quantization and MTP speculative decoding
+# Inkling Small with NVFP4 quantization and no speculative decoding
 
 recipe_version: "1"
 name: Inkling-Small-NVFP4
@@ -18,7 +18,6 @@ container: vllm-node
 mods:
   - mods/inkling-sm12-paged-kv
   - mods/drop-caches
-  - mods/instanttensor-hybrid-draft-loader
 
 # Default settings (can be overridden via CLI where supported)
 defaults:
@@ -28,13 +27,14 @@ defaults:
   gpu_memory_utilization: 0.8
   max_model_len: 262144
   max_num_seqs: 2
-  num_speculative_tokens: 1
 
 # Environment variables
 env:
   LAMPORT_RS_SCONV: "0"
   VLLM_USE_BREAKABLE_CUDAGRAPH: "0"
   VLLM_USE_AOT_COMPILE: "1"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  FLASH_ATTENTION_CUTE_DSL_CACHE_ENABLED: "1"
 
 # The vLLM serve command template
 command: |
@@ -55,5 +55,6 @@ command: |
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --async-scheduling \
+    --kernel-config.enable_flashinfer_autotune=False \
     --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}}' \
-    --speculative-config '{{"method":"mtp","num_speculative_tokens":{num_speculative_tokens}}}'
+    --disable-uvicorn-access-log

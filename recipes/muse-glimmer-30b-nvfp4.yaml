@@ -1,0 +1,35 @@
+recipe_version: "1"
+name: Muse-Glimmer-30B-NVFP4-Solo
+description: Muse Glimmer W4A4 NVFP4 with dedicated Muse parsers and no Qwen MTP
+model: Inferact/Muse-Glimmer-30B-NVFP4-W4A4
+solo_only: true
+container: vllm-node
+build_args: [--rebuild-vllm, --apply-vllm-pr, "51655"]
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.8
+  max_model_len: 131072
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+env:
+  TRITON_CACHE_DIR: /workspace/.triton_cache
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+command: |
+  vllm serve Inferact/Muse-Glimmer-30B-NVFP4-W4A4 \
+    --host {host} --port {port} \
+    --served-model-name muse-glimmer \
+    --tensor-parallel-size {tensor_parallel} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --kv-cache-dtype fp8 \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --async-scheduling \
+    --enable-auto-tool-choice \
+    --tool-call-parser muse_glimmer \
+    --reasoning-parser muse_glimmer \
+    --generation-config auto
