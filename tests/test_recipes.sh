@@ -487,6 +487,20 @@ test_launch_cluster_help() {
         log_fail "--help does not document --publish"
         log_verbose "$output"
     fi
+
+    if echo "$output" | grep -q -- "--volume"; then
+        log_pass "--help documents --volume"
+    else
+        log_fail "--help does not document --volume"
+        log_verbose "$output"
+    fi
+
+    if echo "$output" | grep -q -- "Do not pass --distributed-executor-backend"; then
+        log_pass "--help documents automatic vLLM multiprocessing orchestration"
+    else
+        log_fail "--help does not document automatic vLLM multiprocessing orchestration"
+        log_verbose "$output"
+    fi
 }
 
 # Test: launch-cluster.sh references examples/ not profiles/
@@ -569,10 +583,11 @@ EOF
     exit_code=$?
     rm -f "$temp_recipe"
     
-    if echo "$output" | grep -q "requires cluster mode"; then
-        log_pass "cluster_only recipe correctly fails in solo mode"
+    if echo "$output" | grep -q "requires cluster mode" && \
+       echo "$output" | grep -q "1\. Auto-discover and save"; then
+        log_pass "cluster_only recipe fails in solo mode and recommends autodiscovery"
     else
-        log_fail "cluster_only recipe did not fail in solo mode"
+        log_fail "cluster_only recipe did not fail with autodiscovery guidance"
         log_verbose "$output"
     fi
 }
@@ -946,6 +961,52 @@ test_launch_cmd_publish_rejects_cluster() {
         log_pass "-p port mappings rejected in cluster mode"
     else
         log_fail "-p port mappings were not rejected in cluster mode"
+        log_verbose "$output"
+    fi
+}
+
+# Test: -v / --volume passthrough to launch-cluster.sh
+test_launch_cmd_volume_passthrough() {
+    log_test "Launch command includes -v volume mappings"
+
+    recipe_name=$(find_solo_recipe)
+    if [[ -z "$recipe_name" ]]; then
+        log_skip "No solo-capable recipes found"
+        return
+    fi
+
+    output=$("$PROJECT_DIR/run-recipe.py" "$recipe_name" --dry-run --solo \
+        -v /data/models:/models --volume /data/results:/results:ro 2>&1)
+    launch_cmd=$(extract_launch_cmd "$output")
+
+    if echo "$launch_cmd" | grep -q "\-v /data/models:/models" \
+        && echo "$launch_cmd" | grep -q "\-v /data/results:/results:ro"; then
+        log_pass "Launch command includes -v volume mappings"
+    else
+        log_fail "-v volume mappings not found in launch command"
+        log_verbose "Launch cmd: $launch_cmd"
+    fi
+}
+
+# Test: launch-cluster.sh accepts multiple Docker-style volume mappings
+test_launch_cluster_volume_mappings() {
+    log_test "launch-cluster.sh accepts multiple volume mappings"
+
+    config_file=$(mktemp)
+    output=$("$PROJECT_DIR/launch-cluster.sh" \
+        --config "$config_file" \
+        --solo \
+        --check-config \
+        --no-cache-dirs \
+        -v /data/models:/models \
+        --volume=/data/results:/results:ro 2>&1)
+    rm -f "$config_file"
+
+    if echo "$output" | grep -q "\-v /data/models:/models" \
+        && echo "$output" | grep -q "\-v /data/results:/results:ro"; then
+        log_pass "launch-cluster.sh includes all volume mappings in Docker args"
+    else
+        log_fail "launch-cluster.sh did not include all volume mappings"
         log_verbose "$output"
     fi
 }
@@ -1518,6 +1579,7 @@ main() {
     test_launch_cmd_no_env_by_default
     test_launch_cmd_publish_passthrough
     test_launch_cmd_publish_rejects_cluster
+    test_launch_cmd_volume_passthrough
     test_launch_cmd_keep_entrypoint_passthrough
     test_launch_cmd_earlyoom_passthrough
     test_launch_cmd_earlyoom_rejects_keep_entrypoint
@@ -1540,6 +1602,7 @@ main() {
     
     # launch-cluster.sh tests
     test_launch_cluster_help
+    test_launch_cluster_volume_mappings
     test_launch_cluster_examples_path
     echo ""
     
