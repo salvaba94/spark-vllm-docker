@@ -1,0 +1,39 @@
+recipe_version: "1"
+name: Qwen3.8-27B-BF16-Solo-MTP
+description: Official Qwen3.8 27B BF16 tuned for one DGX Spark with native Qwen3.8 MTP
+model: Qwen/Qwen3.8-27B
+solo_only: true
+container: vllm-node
+build_args: [--rebuild-vllm, --vllm-ref, main]
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.75
+  max_model_len: 262144
+  max_num_batched_tokens: 32768
+  max_num_seqs: 4
+env:
+  TRITON_CACHE_DIR: /workspace/.triton_cache
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  VLLM_USE_FLASHINFER_SAMPLER: "0"
+command: |
+  vllm serve Qwen/Qwen3.8-27B \
+    --host {host} --port {port} \
+    --served-model-name qwen3.8-27b \
+    --tensor-parallel-size {tensor_parallel} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --kv-cache-dtype fp8 \
+    --attention-backend flashinfer \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --async-scheduling \
+    --mm-encoder-tp-mode data \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{{"preserve_thinking":true}}' \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":3}}'

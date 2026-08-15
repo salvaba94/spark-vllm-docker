@@ -1,6 +1,6 @@
 recipe_version: "1"
 name: Muse-Glimmer-30B-NVFP4-Solo
-description: Muse Glimmer W4A4 NVFP4 with dedicated Muse parsers and no Qwen MTP
+description: Muse Glimmer W4A4 NVFP4 with dedicated Muse parsers and no speculative decoding
 model: Inferact/Muse-Glimmer-30B-NVFP4-W4A4
 solo_only: true
 container: vllm-node
