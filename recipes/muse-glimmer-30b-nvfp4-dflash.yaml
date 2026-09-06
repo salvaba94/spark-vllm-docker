@@ -1,6 +1,6 @@
 recipe_version: "1"
-name: Muse-Glimmer-30B-NVFP4-Solo-DFlash
-description: Muse Glimmer W4A4 NVFP4 with dedicated Muse parsers and its dedicated Muse DFlash assistant
+name: Muse-Glimmer-30B-NVFP4-Arena-Solo-DFlash
+description: Spark Arena single-Spark Muse Glimmer NVFP4 profile with dedicated parsers and DFlash assistant
 model: Inferact/Muse-Glimmer-30B-NVFP4-W4A4
 solo_only: true
 container: vllm-node
@@ -9,13 +9,16 @@ defaults:
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 1
-  gpu_memory_utilization: 0.8
+  gpu_memory_utilization: 0.55
   max_model_len: 131072
-  max_num_batched_tokens: 32768
+  max_num_batched_tokens: 8192
   max_num_seqs: 4
 env:
   TRITON_CACHE_DIR: /workspace/.triton_cache
   PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  TORCH_MATMUL_PRECISION: high
+  FLASHINFER_DISABLE_VERSION_CHECK: "1"
 command: |
   vllm serve Inferact/Muse-Glimmer-30B-NVFP4-W4A4 \
     --host {host} --port {port} \
@@ -26,6 +29,9 @@ command: |
     --max-num-batched-tokens {max_num_batched_tokens} \
     --max-num-seqs {max_num_seqs} \
     --kv-cache-dtype fp8 \
+    --language-model-only \
+    --load-format fastsafetensors \
+    --kernel-config '{{"linear_backend":"flashinfer_cutlass"}}' \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --async-scheduling \
@@ -33,4 +39,5 @@ command: |
     --tool-call-parser muse_glimmer \
     --reasoning-parser muse_glimmer \
     --generation-config auto \
-    --speculative-config '{{"method":"dflash","model":"meta-models/Muse-Glimmer-30B-assistant","num_speculative_tokens":15}}'
+    --override-generation-config '{{"temperature":1.0,"top_p":0.95,"top_k":64}}' \
+    --speculative-config '{{"method":"dflash","model":"meta-models/Muse-Glimmer-30B-assistant","num_speculative_tokens":16}}'

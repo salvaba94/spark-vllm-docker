@@ -12,6 +12,7 @@
 
 # Don't exit on first failure; we want a full summary.
 set +e
+shopt -s globstar nullglob
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -63,8 +64,18 @@ get_recipe_flag() {
     grep -E "^${flag_name}:" "$recipe_file" | awk '{print $2}'
 }
 
+find_recipe_file() {
+    local recipe_name="$1"
+    local matches=("$PROJECT_DIR/recipes/"**/"${recipe_name}.yaml")
+    if [[ ${#matches[@]} -eq 1 ]]; then
+        printf '%s\n' "${matches[0]}"
+        return 0
+    fi
+    return 1
+}
+
 find_solo_recipe() {
-    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml "$PROJECT_DIR/recipes/2x-spark-cluster/"*.yaml; do
         if [[ -f "$recipe" ]]; then
             cluster_only=$(get_recipe_flag "cluster_only" "$recipe")
             if [[ "$cluster_only" == "true" ]]; then
@@ -78,7 +89,7 @@ find_solo_recipe() {
 }
 
 find_solo_recipe_with_tensor_parallel() {
-    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml "$PROJECT_DIR/recipes/2x-spark-cluster/"*.yaml; do
         if [[ -f "$recipe" ]]; then
             cluster_only=$(get_recipe_flag "cluster_only" "$recipe")
             if [[ "$cluster_only" == "true" ]]; then
@@ -94,7 +105,7 @@ find_solo_recipe_with_tensor_parallel() {
 }
 
 find_cluster_recipe() {
-    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml "$PROJECT_DIR/recipes/2x-spark-cluster/"*.yaml; do
         if [[ -f "$recipe" ]]; then
             solo_only=$(get_recipe_flag "solo_only" "$recipe")
             if [[ "$solo_only" == "true" ]]; then
@@ -108,7 +119,7 @@ find_cluster_recipe() {
 }
 
 find_recipe_with_mods() {
-    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml "$PROJECT_DIR/recipes/2x-spark-cluster/"*.yaml; do
         if [[ -f "$recipe" ]]; then
             has_mods=$(awk '
                 /^mods:/ {inmods=1; next}
@@ -144,7 +155,8 @@ recipe_has_mod() {
 
 get_recipe_mode() {
     local recipe_name="$1"
-    local recipe_file="$PROJECT_DIR/recipes/${recipe_name}.yaml"
+    local recipe_file
+    recipe_file=$(find_recipe_file "$recipe_name") || return 1
     local cluster_only
     local solo_only
     cluster_only=$(get_recipe_flag "cluster_only" "$recipe_file")
@@ -235,7 +247,7 @@ test_recipe_version_required() {
     log_test "All recipes have required recipe_version field"
     
     local all_valid=true
-    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml "$PROJECT_DIR/recipes/2x-spark-cluster/"*.yaml; do
         if [[ -f "$recipe" ]]; then
             recipe_name=$(basename "$recipe")
             if ! grep -q "^recipe_version:" "$recipe"; then
@@ -257,9 +269,10 @@ test_all_recipes_load() {
     log_test "All recipes load without errors"
     
     local all_valid=true
-    for recipe in "$PROJECT_DIR/recipes/"*.yaml; do
+    for recipe in "$PROJECT_DIR/recipes/"*.yaml "$PROJECT_DIR/recipes/2x-spark-cluster/"*.yaml; do
         if [[ -f "$recipe" ]]; then
-            recipe_name=$(basename "$recipe" .yaml)
+            recipe_name="${recipe#"$PROJECT_DIR/recipes/"}"
+            recipe_name="${recipe_name%.yaml}"
             cluster_only=$(grep -E "^cluster_only:" "$recipe" | awk '{print $2}')
             solo_only=$(grep -E "^solo_only:" "$recipe" | awk '{print $2}')
             
@@ -391,7 +404,7 @@ test_cluster_mode_defaults_no_ray() {
     log_test "Cluster mode defaults to no-Ray"
 
     # Use minimax-m2-awq which explicitly has --distributed-executor-backend ray in the recipe
-    if [[ ! -f "$PROJECT_DIR/recipes/minimax-m2-awq.yaml" ]]; then
+    if ! find_recipe_file "minimax-m2-awq" >/dev/null; then
         log_skip "minimax-m2-awq.yaml not found"
         return
     fi
@@ -1154,7 +1167,7 @@ verify_recipe_args() {
     
     log_test "README match: $recipe_name"
     
-    if [[ ! -f "$PROJECT_DIR/recipes/${recipe_name}.yaml" ]]; then
+    if ! find_recipe_file "$recipe_name" >/dev/null; then
         log_skip "${recipe_name}.yaml not found"
         return
     fi
@@ -1272,7 +1285,7 @@ verify_cluster_args() {
     
     log_test "README match (cluster): $recipe_name"
     
-    if [[ ! -f "$PROJECT_DIR/recipes/${recipe_name}.yaml" ]]; then
+    if ! find_recipe_file "$recipe_name" >/dev/null; then
         log_skip "${recipe_name}.yaml not found"
         return
     fi

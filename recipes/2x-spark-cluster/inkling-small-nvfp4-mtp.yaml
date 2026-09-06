@@ -1,12 +1,12 @@
-# Recipe: Inkling-Small-FP8
+# Recipe: Inkling-Small-NVFP4
 # Inkling Small with NVFP4 quantization and native Inkling MTP speculative decoding
 
 recipe_version: "1"
-name: Inkling-Small-FP8-MTP
-description: vLLM serving RedHatAI/Inkling-Small-FP8-dynamic on a four-node DGX Spark cluster
+name: Inkling-Small-NVFP4-MTP
+description: vLLM serving thinkingmachines/Inkling-Small-NVFP4 on a two-node DGX Spark cluster
 
 # HuggingFace model to download with --setup
-model: RedHatAI/Inkling-Small-FP8-dynamic
+model: thinkingmachines/Inkling-Small-NVFP4
 
 # The launch command uses tensor parallelism across two nodes
 cluster_only: true
@@ -24,10 +24,11 @@ mods:
 defaults:
   port: 8000
   host: 0.0.0.0
-  tensor_parallel: 4
-  gpu_memory_utilization: 0.8
+  tensor_parallel: 2
+  # Upstream PR #329 reports 0.8 can exhaust unified memory on this footprint.
+  gpu_memory_utilization: 0.77
   max_model_len: 262144
-  max_num_seqs: 2
+  max_num_seqs: 3
   num_speculative_tokens: 1
 
 # Environment variables
@@ -40,7 +41,8 @@ env:
 
 # The vLLM serve command template
 command: |
-  vllm serve RedHatAI/Inkling-Small-FP8-dynamic \
+  vllm serve thinkingmachines/Inkling-Small-NVFP4 \
+    --served-model-name inkling-small \
     --host {host} \
     --port {port} \
     --trust-remote-code \
@@ -49,14 +51,17 @@ command: |
     --enable-auto-tool-choice \
     --tool-call-parser inkling \
     --reasoning-parser inkling \
+    --distributed-executor-backend ray \
     --gpu-memory-utilization {gpu_memory_utilization} \
     --max-model-len {max_model_len} \
     --max-num-seqs {max_num_seqs} \
     --load-format instanttensor \
+    --quantization nvfp4 \
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --async-scheduling \
     --kernel-config.enable_flashinfer_autotune=False \
     --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}}' \
     --disable-uvicorn-access-log \
+    --default-chat-template-kwargs '{{"reasoning_effort":0.99}}' \
     --speculative-config '{{"method":"mtp","num_speculative_tokens":{num_speculative_tokens}}}'

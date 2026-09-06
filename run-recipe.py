@@ -177,7 +177,7 @@ def load_recipe(recipe_path: Path) -> dict[str, Any]:
     EXTENSIBILITY:
     - To add new required fields: Add to the 'required' list below
     - To add new optional fields with defaults: Add to the setdefault() calls at the end
-    - Recipe search order: exact path -> recipes/ dir -> with .yaml -> with .yml
+    - Recipe search order: exact path -> recipes/ dir -> unique recursive basename
 
     RECIPE SCHEMA:
         name (str, required): Human-readable name for the recipe
@@ -205,11 +205,15 @@ def load_recipe(recipe_path: Path) -> dict[str, Any]:
         SystemExit: If recipe not found or validation fails
     """
     if not recipe_path.exists():
-        # Try candidates in order: add extension to original path first,
-        # then fall back to flat recipes/ directory (for bare recipe names)
+        # Try explicit/flat candidates first, then a unique basename anywhere
+        # below recipes/. This preserves bare-name compatibility for recipes
+        # organized into node-count subdirectories.
         candidates = [
             Path(str(recipe_path) + ".yaml"),
             Path(str(recipe_path) + ".yml"),
+            RECIPES_DIR / recipe_path,
+            RECIPES_DIR / Path(str(recipe_path) + ".yaml"),
+            RECIPES_DIR / Path(str(recipe_path) + ".yml"),
             RECIPES_DIR / recipe_path.name,
             RECIPES_DIR / f"{recipe_path.name}.yaml",
             RECIPES_DIR / f"{recipe_path.name}.yml",
@@ -220,9 +224,23 @@ def load_recipe(recipe_path: Path) -> dict[str, Any]:
                 recipe_path = candidate
                 break
         else:
-            print(f"Error: Recipe not found: {recipe_path}")
-            print(f"Searched in: {recipe_path}, {RECIPES_DIR}")
-            sys.exit(1)
+            recursive_matches = sorted(
+                {
+                    *RECIPES_DIR.rglob(f"{recipe_path.stem}.yaml"),
+                    *RECIPES_DIR.rglob(f"{recipe_path.stem}.yml"),
+                }
+            )
+            if len(recursive_matches) == 1:
+                recipe_path = recursive_matches[0]
+            elif len(recursive_matches) > 1:
+                print(f"Error: Recipe name is ambiguous: {recipe_path}")
+                for match in recursive_matches:
+                    print(f"  {match.relative_to(RECIPES_DIR)}")
+                sys.exit(1)
+            else:
+                print(f"Error: Recipe not found: {recipe_path}")
+                print(f"Searched in: {recipe_path}, {RECIPES_DIR} (recursively)")
+                sys.exit(1)
 
     with open(recipe_path) as f:
         recipe = yaml.safe_load(f)
@@ -273,7 +291,7 @@ def list_recipes() -> None:
         print("No recipes directory found.")
         return
 
-    recipes = sorted(RECIPES_DIR.glob("*.yaml"))
+    recipes = sorted(RECIPES_DIR.rglob("*.yaml"))
     if not recipes:
         print("No recipes found in recipes/ directory.")
         return
@@ -292,7 +310,7 @@ def list_recipes() -> None:
             cluster_only = recipe.get("cluster_only", False)
             solo_only = recipe.get("solo_only", False)
 
-            print(f"  {recipe_path.name}")
+            print(f"  {recipe_path.relative_to(RECIPES_DIR)}")
             print(f"    Name: {name}")
             if desc:
                 print(f"    Description: {desc}")
