@@ -8,6 +8,7 @@ START_TIME=$(date +%s)
 IMAGE_TAG="vllm-node"
 IMAGE_TAG_SET=false
 PREBUILT_RUNNER_IMAGE="eugr/spark-vllm:latest"
+PREBUILT_RUNNER_IMAGE_SET=false
 PREBUILT_B12X_RUNNER_IMAGE="eugr/spark-vllm-b12x:latest"
 USE_WHEELS=false
 REBUILD_FLASHINFER=false
@@ -602,6 +603,7 @@ promote_wheel_set() {
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "  -t, --tag <tag>               : Local image tag (default: 'vllm-node'; preset tags: 'vllm-node-tf5', 'vllm-node-mxfp4', or 'vllm-node-b12x')"
+    echo "  --prebuilt-runner-image <img> : Pull this exact prebuilt runner instead of the default eugr image"
     echo "  --use-wheels                  : Build only the runner from precompiled wheels; never implicitly build source."
     echo "  --gpu-arch <arch>             : GPU architecture for NCCL, wheel, and source builds (default: '${DEFAULT_GPU_ARCH_LIST}')"
     echo "  --rebuild-flashinfer          : Force rebuild of FlashInfer wheels (ignore cached wheels)"
@@ -660,6 +662,16 @@ CONFIG_FILE_SET=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -t|--tag) IMAGE_TAG="$2"; IMAGE_TAG_SET=true; shift ;;
+        --prebuilt-runner-image)
+            if [ -n "$2" ] && [[ "$2" != -* ]]; then
+                PREBUILT_RUNNER_IMAGE="$2"
+                PREBUILT_RUNNER_IMAGE_SET=true
+                shift
+            else
+                echo "Error: --prebuilt-runner-image requires an image reference."
+                exit 1
+            fi
+            ;;
         --use-wheels) USE_WHEELS=true ;;
         --gpu-arch) GPU_ARCH_LIST="$2"; GPU_ARCH_SET=true; shift ;;
         --rebuild-flashinfer) REBUILD_FLASHINFER=true ;;
@@ -795,6 +807,7 @@ done
 # The B12X preset uses the standard Dockerfile and source-build path, but owns
 # the fork/ref and Torch-family versions needed by that integration.
 if [ "$EXP_B12X" = true ]; then
+    if [ "$PREBUILT_RUNNER_IMAGE_SET" = true ]; then echo "Error: --exp-b12x is incompatible with --prebuilt-runner-image"; exit 1; fi
     if [ "$EXP_MXFP4" = true ]; then echo "Error: --exp-b12x is incompatible with --exp-mxfp4"; exit 1; fi
     if [ "$USE_WHEELS" = true ]; then echo "Error: --exp-b12x is incompatible with --use-wheels because B12X vLLM wheels are not published"; exit 1; fi
     if [ "$VLLM_REPO_SET" = true ]; then echo "Error: --exp-b12x is incompatible with --vllm-repo"; exit 1; fi
@@ -1018,6 +1031,11 @@ if [ "$FORCE_VLLM_DOWNLOAD" = true ]; then CUSTOM_BUILD_REQUESTED=true; fi
 if [ -n "$VLLM_PRS" ]; then CUSTOM_BUILD_REQUESTED=true; fi
 if [ "$APPLY_PRESET_VLLM_PRS" = true ]; then CUSTOM_BUILD_REQUESTED=true; fi
 if [ -n "$FLASHINFER_PRS" ]; then CUSTOM_BUILD_REQUESTED=true; fi
+
+if [ "$PREBUILT_RUNNER_IMAGE_SET" = true ] && [ "$CUSTOM_BUILD_REQUESTED" = true ]; then
+    echo "Error: --prebuilt-runner-image cannot be combined with source, wheel, or custom build options." >&2
+    exit 1
+fi
 
 # Only local wheel/image builds consume the wheel cache. A normal default invocation
 # still pulls the prebuilt runner even if the local wheel cache targets another

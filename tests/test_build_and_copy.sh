@@ -236,6 +236,18 @@ test_custom_tag_uses_prebuilt_custom_tag() {
     pass "custom tag pulls prebuilt image under requested tag"
 }
 
+test_explicit_prebuilt_runner_image() {
+    setup_fixture
+    run_build \
+        -t ghcr.io/lancelind/qwen38-flash-dgx:latest \
+        --prebuilt-runner-image ghcr.io/lancelind/qwen38-flash-dgx:latest \
+        || fail "explicit prebuilt runner image failed"
+    assert_log_contains '^docker pull ghcr.io/lancelind/qwen38-flash-dgx:latest$'
+    assert_log_not_contains '^docker tag '
+    assert_log_not_contains '^docker build'
+    pass "explicit prebuilt runner image pulls the requested image unchanged"
+}
+
 test_default_gpu_arch_stays_prebuilt() {
     setup_fixture
     run_build --gpu-arch 12.1a || fail "default gpu arch run failed"
@@ -1391,6 +1403,7 @@ for path in files:
 test_default_uses_prebuilt
 test_tf5_uses_prebuilt_tf5_tag
 test_custom_tag_uses_prebuilt_custom_tag
+test_explicit_prebuilt_runner_image
 test_default_gpu_arch_stays_prebuilt
 test_non_default_gpu_arch_uses_wheel_build
 test_default_prebuilt_ignores_local_flashinfer_arch

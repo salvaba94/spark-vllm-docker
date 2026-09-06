@@ -1,0 +1,52 @@
+# Published single-DGX-Spark vLLM recipe from the travelinlance/lancelind stack.
+# The patched image memory-maps the 44 GiB PLE table from local NVMe.
+
+recipe_version: "1"
+name: Qwen3.8-Flash-Next-RadixArk-NVFP4-Hybrid-Sharp-Solo
+description: Single-Spark Qwen3.8 Flash-Next hybrid with NVFP4 experts, FP8 dense side layers, Sharp template, and GPU PLE mmap gather
+model: travelinlance/Qwen3.8-Flash-Next-RadixArk-NVFP4-Hybrid-Sharp
+container: ghcr.io/lancelind/qwen38-flash-dgx:latest
+solo_only: true
+
+build_args:
+  - --prebuilt-runner-image
+  - ghcr.io/lancelind/qwen38-flash-dgx:latest
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.75
+  max_model_len: 262144
+  max_num_seqs: 8
+  max_num_batched_tokens: 8192
+
+env:
+  HF_HUB_OFFLINE: "1"
+  VLLM_PLE_MMAP: "1"
+  VLLM_PLE_GPU_GATHER: "1"
+  VLLM_PLE_DECODE_WARM: "1"
+  VLLM_FP8_HYBRID: "1"
+  VLLM_USE_DEEP_GEMM: "0"
+  VLLM_QSA_EXACT_TOPK: "1"
+  VLLM_USE_FLASHINFER_SAMPLER: "1"
+
+command: |
+  vllm serve travelinlance/Qwen3.8-Flash-Next-RadixArk-NVFP4-Hybrid-Sharp \
+    --served-model-name qwen3.8-flash-next \
+    --host {host} \
+    --port {port} \
+    --load-format safetensors \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --compilation-config '{{"cudagraph_mode":"PIECEWISE","splitting_ops":["vllm::unified_attention_with_output","vllm::unified_mla_attention_with_output","vllm::mamba_mixer2","vllm::mamba_mixer","vllm::short_conv","vllm::qwen3_8_flash_next_ple_short_conv","vllm::qwen3_8_flash_next_qsa_with_output","vllm::linear_attention","vllm::qwen_gdn_attention_core","vllm::qwen_gdn_attention_core_fused_norm_packed","vllm::sparse_attn_indexer"]}}' \
+    --no-enable-flashinfer-autotune \
+    --kv-cache-dtype auto \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --tensor-parallel-size {tensor_parallel}

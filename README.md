@@ -181,10 +181,22 @@ checkpoint to vLLM's Qwen3 DSpark loader and keeps the BF16 draft unquantized.
 ./run-recipe.sh qwen3.8-27b-fp8-dspark --solo
 ```
 
-`RadixArk/Qwen3.8-Flash-Next-NVFP4` is not included as a vLLM recipe. Its
-current 135 GB hybrid checkpoint exceeds one Spark's 128 GB unified memory
-before runtime and KV-cache overhead, and its documented deployment path uses
-SGLang-specific QSA, PLE offload, and compatibility patches.
+`RadixArk/Qwen3.8-Flash-Next-NVFP4` cannot use the ordinary in-memory vLLM
+recipe because that layout exceeds one Spark's available unified memory before
+runtime and KV-cache overhead. The
+`qwen3.8-flash-next-radixark-nvfp4-hybrid-sharp` recipe uses the independently
+validated patched vLLM image from `lancelind/qwen3.8-Flash-DGX`, which memory
+maps the 44 GiB PLE table from local NVMe and supports the travelinlance hybrid
+checkpoint on one Spark:
+
+```bash
+./run-recipe.sh qwen3.8-flash-next-radixark-nvfp4-hybrid-sharp --solo --setup
+```
+
+Keep the model cache on fast local NVMe. This profile intentionally uses
+automatic (BF16) KV cache and disables MTP, matching the published
+throughput-oriented recipe; FP8 KV cache and MTP trade away speed or response
+quality on this model.
 
 ### 2026-09-05
 
