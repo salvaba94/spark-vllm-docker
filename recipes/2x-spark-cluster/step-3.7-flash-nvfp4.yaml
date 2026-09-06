@@ -3,7 +3,7 @@
 
 recipe_version: "1"
 name: Step-3.7-Flash-NVFP4
-description: vLLM serving Step-3.7-Flash-NVFP4 on two Sparks
+description: vLLM serving Step-3.7-Flash-NVFP4 with native three-token MTP on two Sparks
 
 # HuggingFace model to download (optional, for --download-model)
 model: stepfun-ai/Step-3.7-Flash-NVFP4
@@ -25,6 +25,7 @@ defaults:
   tensor_parallel: 2
   gpu_memory_utilization: 0.8
   max_model_len: 262144
+  num_speculative_tokens: 3
 
 # Environment variables
 env: {}
@@ -42,4 +43,5 @@ command: |
       --enable-auto-tool-choice \
       --reasoning-parser step3p5 \
       --tool-call-parser step3p5 \
-      --load-format instanttensor
+      --load-format instanttensor \
+      --speculative-config '{{"method":"mtp","num_speculative_tokens":{num_speculative_tokens}}}'

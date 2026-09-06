@@ -170,12 +170,21 @@ For periodic maintenance, I recommend using a filter: `docker builder prune --fi
 
 ### 2026-09-06
 
-#### Qwen3.8 recipe audit
+#### Qwen3.8 DFlash2 and experimental RadixArk DSpark recipes
 
-`RadixArk/Qwen3.8-27B-DSpark` is a speculative draft, not a standalone target.
-Its published successful serving path currently uses SGLang. The experimental
-vLLM compatibility mod and unbenchmarked selectors were removed; use the
-upstream Qwen3.8 DFlash2 recipe or an Arena-published MTP/baseline recipe.
+Qwen3.8 27B now has DFlash2 recipes for the official FP8 and RadixArk NVFP4
+targets. Experimental DSpark recipes for both targets apply
+`mods/radixark-dspark`, which routes the generic Qwen draft checkpoint to
+vLLM's Qwen3 DSpark loader and keeps its BF16 weights unquantized. The DSpark
+publisher documents SGLang, so benchmark these vLLM adapters before preferring
+them over DFlash2 or native MTP.
+
+```bash
+./run-recipe.sh qwen3.8-27b-fp8-dflash2 --solo
+./run-recipe.sh qwen3.8-27b-nvfp4-dflash2 --solo
+./run-recipe.sh qwen3.8-27b-fp8-dspark --solo
+./run-recipe.sh qwen3.8-27b-nvfp4-dspark --solo
+```
 
 `RadixArk/Qwen3.8-Flash-Next-NVFP4` cannot use the ordinary in-memory vLLM
 recipe because that layout exceeds one Spark's available unified memory before
@@ -2032,6 +2041,7 @@ The repository includes several pre-configured mods in the `mods/` directory:
 - **fix-qwen3.5-chat-template/** and **fix-qwen3.6-chat-template/**: Install fixed chat templates used by the Qwen3.5 and Qwen3.6 recipes.
 - **fix-qwen3.5-autoround/**, **fix-qwen3-next-autoround/**, and **fix-qwen35-tp4-marlin/**: Model-specific Qwen AutoRound and Marlin compatibility fixes.
 - **fix-qwen3-coder-next/**: Qwen3-Coder-Next runtime and performance fixes.
+- **radixark-dspark/**: Experimentally normalizes generic Qwen DSpark checkpoints such as `RadixArk/Qwen3.8-27B-DSpark` to vLLM's Qwen3 DSpark loader.
 - **dspark-instanttensor/**: Filters embedded `mtp.*` DSpark draft weights before InstantTensor or safetensors I/O, preventing a second full-checkpoint load.
 - **gpu-mem-util-gb/**: Adds experimental `--gpu-memory-utilization-gb` support.
 - **kv-cache-prealloc-cleanup/**: Applies model-specific manual KV-cache startup tweaks: skip CUDA graph profiling when disabled by env and allow `--gpu-memory-utilization-gb` with `--kv-cache-memory-bytes`.
