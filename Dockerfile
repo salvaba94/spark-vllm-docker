@@ -12,6 +12,10 @@ ARG B12X_REPO=""
 ARG B12X_REF=""
 ARG B12X_CACHEBUST=""
 
+# Empty fallback for ordinary remote-source builds. A caller may override this
+# stage with --build-context vllm_source=/path/to/checkout.
+FROM scratch AS vllm_source
+
 # =========================================================
 # STAGE 1: Base Build Image
 # =========================================================
@@ -318,6 +322,8 @@ ARG CACHEBUST_VLLM=1
 ARG VLLM_UPSTREAM_REPO=https://github.com/vllm-project/vllm.git
 ARG VLLM_REPO=https://github.com/vllm-project/vllm.git
 ARG VLLM_REF=main
+ARG VLLM_SOURCE_MODE=remote
+ARG VLLM_SOURCE_COMMIT=""
 
 # Pinned while investigating an SM121 DeepSeek-V4 MXFP4 grouped scale-factor
 # regression first observed at nv_dev f8e8fb5 (PR #384); last known good.
@@ -328,9 +334,31 @@ ENV DEEPGEMM_SRC_DIR=/workspace/DeepGEMM
 # The upstream repository uses the shared checkout cache. Custom repositories
 # are cloned outside it so a fork can never reuse or mutate the upstream clone.
 RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
+    --mount=type=bind,from=vllm_source,target=/tmp/vllm-local-source \
     set -eux; \
     echo "CACHEBUST_VLLM=${CACHEBUST_VLLM}"; \
-    if [ "$VLLM_REPO" != "$VLLM_UPSTREAM_REPO" ]; then \
+    if [ "$VLLM_SOURCE_MODE" = "local" ]; then \
+        echo "Local vLLM source selected; using the staged build context."; \
+        if [ -z "$VLLM_SOURCE_COMMIT" ]; then \
+            echo "VLLM_SOURCE_COMMIT is required for a local vLLM source build." >&2; \
+            exit 1; \
+        fi; \
+        if [ ! -d /tmp/vllm-local-source/.git ]; then \
+            echo "Local vLLM source context does not contain a self-contained Git checkout." >&2; \
+            exit 1; \
+        fi; \
+        cp -a /tmp/vllm-local-source /tmp/vllm-custom; \
+        cd /tmp/vllm-custom; \
+        if [ "$(git rev-parse HEAD)" != "$VLLM_SOURCE_COMMIT" ]; then \
+            echo "Local vLLM source commit does not match VLLM_SOURCE_COMMIT." >&2; \
+            exit 1; \
+        fi; \
+        git reset --hard "$VLLM_SOURCE_COMMIT"; \
+        git clean -fdx; \
+        git remote remove origin 2>/dev/null || true; \
+        rm -f .git/FETCH_HEAD; \
+        cp -a /tmp/vllm-custom "$VLLM_BASE_DIR/vllm"; \
+    elif [ "$VLLM_REPO" != "$VLLM_UPSTREAM_REPO" ]; then \
         echo "Custom vLLM repository selected; bypassing shared checkout cache."; \
         git clone --recursive "$VLLM_REPO" /tmp/vllm-custom; \
         cd /tmp/vllm-custom; \
@@ -398,8 +426,9 @@ ARG VLLM_PRS=""
 ARG VLLM_PRESERVE_SM12X_TARGET=0
 ARG VLLM_PATCH_B12X_C128A_ALIGNMENT=0
 
-# PR refs include the branch history they were developed on. Use upstream main
-# only to identify each PR's patch range, then apply that patch to VLLM_REF.
+# Numeric PR refs are resolved from vllm-project/vllm. Full GitHub PR URLs are
+# downloaded from the named repository, preserving that PR's own base range.
+# In both cases, apply only the resulting patch to VLLM_REF.
 RUN set -eux; \
     VLLM_ALL_PRS=""; \
     VLLM_SELECTED_PRESET_PRS=""; \
@@ -431,36 +460,56 @@ RUN set -eux; \
         git config --global user.name "Docker Builder"; \
         \
         echo "Applying PR patches to vLLM ref $VLLM_REF ($VLLM_REQUESTED_HEAD): $VLLM_ALL_PRS"; \
-        echo "Fetching upstream main only to calculate PR patch ranges; current checkout remains $VLLM_REF."; \
-        git remote remove vllm-upstream >/dev/null 2>&1 || true; \
-        git remote add vllm-upstream "$VLLM_UPSTREAM_REPO"; \
-        git fetch vllm-upstream +refs/heads/main:refs/remotes/vllm-upstream/main; \
+        VLLM_HAS_NUMERIC_PRS=""; \
         for pr in $VLLM_ALL_PRS; do \
-            echo "Fetching PR #$pr and applying its patch onto current HEAD..."; \
-            git fetch vllm-upstream +pull/${pr}/head:pr-${pr}; \
-            pr_base="$(git merge-base vllm-upstream/main pr-${pr} || true)"; \
-            if [ -z "$pr_base" ]; then \
-                echo "Unable to find an upstream main merge-base for PR #$pr."; \
+            if printf '%s\n' "$pr" | grep -Eq '^[1-9][0-9]*$'; then \
+                VLLM_HAS_NUMERIC_PRS=1; \
+            fi; \
+        done; \
+        if [ -n "$VLLM_HAS_NUMERIC_PRS" ]; then \
+            echo "Fetching upstream main to calculate numeric PR patch ranges; current checkout remains $VLLM_REF."; \
+            git remote remove vllm-upstream >/dev/null 2>&1 || true; \
+            git remote add vllm-upstream "$VLLM_UPSTREAM_REPO"; \
+            git fetch vllm-upstream +refs/heads/main:refs/remotes/vllm-upstream/main; \
+        fi; \
+        pr_index=0; \
+        for pr in $VLLM_ALL_PRS; do \
+            pr_index=$((pr_index + 1)); \
+            patch_file="/tmp/vllm-pr-${pr_index}.patch"; \
+            if printf '%s\n' "$pr" | grep -Eq '^[1-9][0-9]*$'; then \
+                pr_head="vllm-pr-${pr_index}"; \
+                echo "Fetching upstream vLLM PR #$pr and applying its patch onto current HEAD..."; \
+                git fetch vllm-upstream "+pull/${pr}/head:${pr_head}"; \
+                pr_base="$(git merge-base vllm-upstream/main "$pr_head" || true)"; \
+                if [ -z "$pr_base" ]; then \
+                    echo "Unable to find an upstream main merge-base for PR #$pr."; \
+                    exit 1; \
+                fi; \
+                echo "PR #$pr patch range: $pr_base..$pr_head; apply target: $(git rev-parse HEAD)."; \
+                git diff --binary "$pr_base" "$pr_head" > "$patch_file"; \
+            elif printf '%s\n' "$pr" | grep -Eq '^https://github\.com/[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*/pull/[1-9][0-9]*/?$'; then \
+                pr_url="${pr%/}"; \
+                echo "Fetching vLLM PR from ${pr_url}.diff and applying its patch onto current HEAD..."; \
+                curl -fsSL --retry 3 --retry-delay 1 "${pr_url}.diff" -o "$patch_file"; \
+            else \
+                echo "Invalid vLLM PR reference: $pr" >&2; \
                 exit 1; \
             fi; \
-            patch_file="/tmp/pr-${pr}.patch"; \
-            echo "PR #$pr patch range: $pr_base..pr-${pr}; apply target: $(git rev-parse HEAD)."; \
-            git diff --binary "$pr_base" "pr-${pr}" > "$patch_file"; \
             if [ ! -s "$patch_file" ]; then \
-                echo "PR #$pr has no patch relative to upstream main; skipping."; \
+                echo "vLLM PR $pr has no patch; skipping."; \
                 rm -f "$patch_file"; \
                 continue; \
             fi; \
             if git apply --reverse --check --binary "$patch_file" >/dev/null 2>&1; then \
-                echo "PR #$pr patch is already applied to HEAD; skipping."; \
+                echo "vLLM PR $pr patch is already applied to HEAD; skipping."; \
                 rm -f "$patch_file"; \
                 continue; \
             fi; \
             if git apply --3way --index --binary "$patch_file"; then \
                 if git diff --cached --quiet; then \
-                    echo "PR #$pr patch produced no staged changes; skipping."; \
+                    echo "vLLM PR $pr patch produced no staged changes; skipping."; \
                 else \
-                    git commit -m "Apply vLLM PR #${pr}"; \
+                    git commit -m "Apply vLLM PR ${pr}"; \
                 fi; \
                 rm -f "$patch_file"; \
             else \
@@ -473,27 +522,27 @@ RUN set -eux; \
                     esac; \
                 done; \
                 if [ -z "$conflict_files" ]; then \
-                    echo "PR #$pr patch failed without unmerged files."; \
+                    echo "vLLM PR $pr patch failed without unmerged files."; \
                     rm -f "$patch_file"; \
                     git reset --hard HEAD; \
                     exit 1; \
                 fi; \
                 if [ -n "$code_conflicts" ]; then \
-                    echo "PR #$pr has code patch conflicts: $code_conflicts"; \
+                    echo "vLLM PR $pr has code patch conflicts: $code_conflicts"; \
                     rm -f "$patch_file"; \
                     git reset --hard HEAD; \
                     exit 1; \
                 fi; \
-                echo "Skipping tests/docs conflicts for PR #$pr: $conflict_files"; \
+                echo "Skipping tests/docs conflicts for vLLM PR $pr: $conflict_files"; \
                 for conflict_file in $conflict_files; do \
                     git checkout --ours -- "$conflict_file"; \
                     git add "$conflict_file"; \
                 done; \
                 if git diff --cached --quiet; then \
-                    echo "PR #$pr only changed conflicting tests/docs files; skipping."; \
+                    echo "vLLM PR $pr only changed conflicting tests/docs files; skipping."; \
                     git reset --hard HEAD; \
                 else \
-                    git commit -m "Apply vLLM PR #${pr}"; \
+                    git commit -m "Apply vLLM PR ${pr}"; \
                 fi; \
                 rm -f "$patch_file"; \
             fi; \
@@ -510,6 +559,15 @@ RUN set -eux; \
 # It is also safe for older refs (backend absent) and refs that already contain
 # the fix (idempotent); unknown partial source shapes fail the build.
 COPY docker/patch_vllm_*.py docker/pin_cutlass_dsl.py /tmp/vllm-patches/
+
+# TEMPORARY PATCH: vLLM PR #53306 added a preliminary CUDA-graph memory
+# profiling capture, but only redirects the main graph manager and existing
+# wrappers to its throwaway pool. MTP and other autoregressive speculators own
+# separate prefill/decode managers, so their discarded profiling graphs can
+# invalidate the persistent global pool before the real FULL capture. Keep all
+# speculator managers in the throwaway pool until the oldest supported ref has
+# the equivalent upstream fix.
+RUN python3 /tmp/vllm-patches/patch_vllm_mrv2_speculator_cudagraph_pool.py .
 
 # TEMPORARY PATCH: local-inference-lab/vllm commit ad848fc41 added a dynamic
 # DeepSeek V4 C128A top-k width but omitted the alignment constant import.
@@ -792,9 +850,8 @@ RUN --mount=type=cache,id=git-vllm-omni,target=/git-cache/vllm-omni \
     (git checkout --detach origin/${VLLM_OMNI_REF} 2>/dev/null || git checkout ${VLLM_OMNI_REF}) && \
     uv pip install .
 
-# The local-inference-lab vLLM fork consumes the external B12X kernel package
-# at runtime. Keep this opt-in so ordinary vLLM images do not pull a
-# package that requires Torch 2.12+. Build B12X from its source repository but
+# Upstream vLLM and the local-inference-lab fork consume the external B12X
+# kernel package at runtime. Build B12X from its source repository but
 # install it without dependencies: vLLM already provides the runtime packages
 # and this image deliberately advances nvidia-cutlass-dsl to 4.7.0 for both
 # regular and B12X builds. B12X kernels remain JIT-compiled on first use;

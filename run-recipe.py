@@ -112,6 +112,43 @@ DISTRIBUTED_EXECUTOR_RE = re.compile(
 )
 
 
+def runtime_vllm_pr_reference(value: str) -> str:
+    """Validate a PR number or canonical public GitHub pull-request URL."""
+    if re.fullmatch(r"[1-9][0-9]*", value):
+        return value
+    if re.fullmatch(
+        r"https://github\.com/"
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*/"
+        r"[A-Za-z0-9][A-Za-z0-9_.-]*/"
+        r"pull/[1-9][0-9]*/?",
+        value,
+    ):
+        return value.rstrip("/")
+    raise argparse.ArgumentTypeError(
+        "must be a positive integer PR number or full "
+        "https://github.com/OWNER/REPO/pull/NUMBER URL"
+    )
+
+
+class OrderedLaunchLayerAction(argparse.Action):
+    """Collect a repeatable launch layer while preserving mixed CLI ordering."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str,
+        option_string: str | None = None,
+    ) -> None:
+        collected = list(getattr(namespace, self.dest, None) or [])
+        collected.append(values)
+        setattr(namespace, self.dest, collected)
+
+        ordered = list(getattr(namespace, "launch_layers", None) or [])
+        ordered.append((self.dest, values))
+        setattr(namespace, "launch_layers", ordered)
+
+
 def strip_distributed_executor_backend(command: str) -> str:
     """Remove vLLM distributed executor backend flags from a command."""
     command = DISTRIBUTED_EXECUTOR_RE.sub("", command)
@@ -735,6 +772,9 @@ Examples:
   # Apply additional launch-cluster mods
   %(prog)s glm-4.7-flash-awq --solo --apply-mod mods/use-official-vllm
 
+  # Apply an upstream vLLM PR at container launch time
+  %(prog)s glm-4.7-flash-awq --solo --apply-vllm-pr 12345
+
   # Publish ports in solo mode
   %(prog)s glm-4.7-flash-awq --solo -p 8000:8000
 
@@ -852,11 +892,20 @@ Examples:
     )
     launch_group.add_argument(
         "--apply-mod",
-        action="append",
+        action=OrderedLaunchLayerAction,
         dest="apply_mods",
         default=[],
         metavar="PATH",
         help="Mod directory or zip to pass to launch-cluster.sh. Can be used multiple times.",
+    )
+    launch_group.add_argument(
+        "--apply-vllm-pr",
+        action=OrderedLaunchLayerAction,
+        type=runtime_vllm_pr_reference,
+        dest="apply_vllm_prs",
+        default=[],
+        metavar="PR_OR_URL",
+        help="Apply a vLLM PR number or full GitHub PR URL to the installed runtime package. Can be used multiple times.",
     )
     launch_group.add_argument(
         "-p",
@@ -1060,6 +1109,8 @@ Examples:
     print()
 
     cli_mods = args.apply_mods or []
+    cli_vllm_prs = args.apply_vllm_prs or []
+    cli_launch_layers = getattr(args, "launch_layers", []) or []
 
     # Determine container image
     container = args.container_override or recipe["container"]
@@ -1200,6 +1251,8 @@ Examples:
             print(f"Container name: {args.container_name}")
         if args.non_privileged:
             print("Non-privileged mode: Yes")
+        if cli_vllm_prs:
+            print(f"Runtime vLLM PRs: {', '.join(cli_vllm_prs)}")
         print()
 
     # --- Build Phase ---
@@ -1365,8 +1418,11 @@ Examples:
         cmd_parts = ["   ./launch-cluster.sh", "-t", container]
         for mod in recipe.get("mods", []):
             cmd_parts.extend(["--apply-mod", mod])
-        for mod in cli_mods:
-            cmd_parts.extend(["--apply-mod", mod])
+        for layer_type, value in cli_launch_layers:
+            if layer_type == "apply_mods":
+                cmd_parts.extend(["--apply-mod", value])
+            else:
+                cmd_parts.extend(["--apply-vllm-pr", value])
         if args.solo:
             cmd_parts.append("--solo")
         elif not is_cluster:
@@ -1462,13 +1518,16 @@ Examples:
             if not mod_path.exists():
                 print(f"Warning: Mod path not found: {mod_path}")
             cmd.extend(["--apply-mod", str(mod_path)])
-        for mod in cli_mods:
-            mod_path = Path(mod).expanduser()
-            if not mod_path.is_absolute():
-                mod_path = Path.cwd() / mod_path
-            if not mod_path.exists():
-                print(f"Warning: Mod path not found: {mod_path}")
-            cmd.extend(["--apply-mod", str(mod_path)])
+        for layer_type, value in cli_launch_layers:
+            if layer_type == "apply_mods":
+                mod_path = Path(value).expanduser()
+                if not mod_path.is_absolute():
+                    mod_path = Path.cwd() / mod_path
+                if not mod_path.exists():
+                    print(f"Warning: Mod path not found: {mod_path}")
+                cmd.extend(["--apply-mod", str(mod_path)])
+            else:
+                cmd.extend(["--apply-vllm-pr", value])
 
         # Add launch options
         if args.solo:
@@ -1540,6 +1599,8 @@ Examples:
         all_mods = recipe.get("mods", []) + cli_mods
         if all_mods:
             print(f"Mods: {', '.join(all_mods)}")
+        if cli_vllm_prs:
+            print(f"Runtime vLLM PRs: {', '.join(cli_vllm_prs)}")
         if is_cluster:
             print(f"Cluster: {len(nodes)} nodes")
         else:
