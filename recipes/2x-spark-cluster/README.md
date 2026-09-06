@@ -4,7 +4,7 @@ These recipes require two DGX Spark nodes. Invoke them by relative path, for
 example:
 
 ```bash
-./run-recipe.sh 2x-spark-cluster/inkling-small-nvfp4-mtp --ray
+./run-recipe.sh 2x-spark-cluster/inkling-small-nvfp4 --ray
 ```
 
 Bare recipe names remain supported when the filename is unique. Recipes marked

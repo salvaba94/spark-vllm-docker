@@ -2,8 +2,8 @@
 # Inkling Small with NVFP4 quantization and native Inkling MTP speculative decoding
 
 recipe_version: "1"
-name: Inkling-Small-NVFP4-MTP
-description: vLLM serving thinkingmachines/Inkling-Small-NVFP4 on a two-node DGX Spark cluster
+name: Inkling-Small-NVFP4
+description: Current upstream Inkling NVFP4 recipe, tuned for native MTP on two DGX Spark nodes
 
 # HuggingFace model to download with --setup
 model: thinkingmachines/Inkling-Small-NVFP4
