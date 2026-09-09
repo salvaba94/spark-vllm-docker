@@ -168,7 +168,37 @@ For periodic maintenance, I recommend using a filter: `docker builder prune --fi
 
 ## CHANGELOG
 
+### 2026-09-08
+
+#### Qwen3.8 Flash Next solo and dual-Spark recipes
+
+Added two recipes for serving
+`local-inference-lab/Qwen3.8-Flash-Next-NVFP4` with the B12X container.
+
+```bash
+# Single DGX Spark
+./run-recipe.sh qwen3.8-flash-next-nvfp4-solo --solo --earlyoom --setup
+
+# Dual DGX Spark cluster
+./run-recipe.sh qwen3.8-flash-next-nvfp4-cluster --earlyoom --setup
+```
+
+#### Deepseek V4 Flash Vision Exp support
+
+B12X container now supports `deepseek-ai/DeepSeek-V4-Flash-Vision-Exp`.
+
+Run with:
+
+```bash
+./run-recipe.sh deepseek-v4-flash-vision-exp --setup
+```
+
+
 ### 2026-09-06
+
+#### Experimental b12x loader
+
+GLM-5.3 Flash recipe is now using experimental b12x loader that is faster and more memory efficient than Instanttensor on DGX Spark. Also reduced KV-cache memory to 8GB to relax memory pressure. Please note that this recipe and b12x builds in general are still experimental, so please update the repository often to keep everything up to date.
 
 #### Qwen3.8 DFlash2 and experimental RadixArk DSpark recipes
 
