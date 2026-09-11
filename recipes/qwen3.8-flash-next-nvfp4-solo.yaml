@@ -64,6 +64,8 @@ command: |
     --no-enable-flashinfer-autotune \
     --language-model-only \
     --reasoning-parser qwen3 \
+    --default-chat-template-kwargs '{{"preserve_thinking":true}}' \
+    --override-generation-config '{{"temperature":1.0,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}}' \
     --tool-call-parser qwen3_xml \
     --enable-auto-tool-choice \
     --compilation-config '{{"pass_config":{{"fuse_act_quant":true}}}}' \

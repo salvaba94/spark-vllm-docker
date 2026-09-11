@@ -71,6 +71,7 @@ command: |
     --max-num-batched-tokens {max_num_batched_tokens} \
     --speculative-config '{{"method":"mtp","num_speculative_tokens":{num_speculative_tokens},"moe_backend":"humming","attention_backend":"B12X"}}' \
     --reasoning-parser glm45 \
+    --override-generation-config '{{"temperature":1.0,"top_p":0.95}}' \
     --tool-call-parser glm47 \
     --enable-auto-tool-choice \
     --kv-cache-memory-bytes {kv_cache_memory_bytes} \
