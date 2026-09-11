@@ -4,7 +4,7 @@ description: Muse Glimmer W4A4 NVFP4 with dedicated Muse parsers and no speculat
 model: Inferact/Muse-Glimmer-30B-NVFP4-W4A4
 solo_only: true
 container: vllm-node
-build_args: [--rebuild-vllm, --apply-vllm-pr, "51655"]
+build_args: [--rebuild-vllm]
 defaults:
   port: 8000
   host: 0.0.0.0

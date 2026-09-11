@@ -348,9 +348,9 @@ test_use_wheels_uses_wheel_build() {
 test_regular_build_includes_b12x_package() {
     setup_fixture
     run_build --use-wheels || fail "regular B12X package run failed"
-    assert_log_contains '^docker build -t vllm-node .*--build-context flashinfer_wheels=\./\.wheel-cache/flashinfer/regular --build-context vllm_wheels=\./\.wheel-cache/vllm/regular .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=master '
+    assert_log_contains '^docker build -t vllm-node .*--build-context flashinfer_wheels=\./\.wheel-cache/flashinfer/regular --build-context vllm_wheels=\./\.wheel-cache/vllm/regular .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 '
     assert_log_contains '.*--build-arg B12X_CACHEBUST=[0-9]+'
-    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref master for https://github\.com/vllm-project/vllm ref main\.'
+    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref 75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 for https://github\.com/vllm-project/vllm ref main\.'
     pass "regular upstream vLLM builds include the B12X package"
 }
 
@@ -660,19 +660,19 @@ test_exp_b12x_rebuild_vllm_uses_preset_source_build() {
     setup_fixture
     run_build --exp-b12x --rebuild-vllm || fail "--exp-b12x --rebuild-vllm run failed"
     assert_log_not_contains '^docker pull eugr/spark-vllm-b12x:latest$'
-    assert_log_contains '^docker build --target vllm-export .*--build-arg TORCH_CUDA_ARCH_LIST=12.1a --build-arg FLASHINFER_CUDA_ARCH_LIST=12.1a .*--build-arg TORCH_VERSION=2.13.0 --build-arg TORCHVISION_VERSION=0.28.0 --build-arg TORCHAUDIO_VERSION=2.11.0 --build-arg CUTLASS_DSL_VERSION=4.7.0 .*--build-arg VLLM_REF=dev/jovian-judgement --build-arg VLLM_REPO=https://github.com/local-inference-lab/vllm --build-arg VLLM_APPLY_PRESET_PRS=0 .*--build-arg VLLM_PRESERVE_SM12X_TARGET=1 --build-arg VLLM_PATCH_B12X_C128A_ALIGNMENT=1'
-    assert_log_contains '^docker build -t vllm-node-b12x .*--build-context flashinfer_wheels=\./\.wheel-cache/flashinfer/regular --build-context vllm_wheels=\./\.wheel-cache/vllm/b12x .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=master '
+    assert_log_contains '^docker build --target vllm-export .*--build-arg TORCH_CUDA_ARCH_LIST=12.1a --build-arg FLASHINFER_CUDA_ARCH_LIST=12.1a .*--build-arg TORCH_VERSION=2.13.0 --build-arg TORCHVISION_VERSION=0.28.0 --build-arg TORCHAUDIO_VERSION=2.11.0 --build-arg CUTLASS_DSL_VERSION=4.7.0 .*--build-arg VLLM_REF=aba94d396d27ea92a2044ad024c003b36da505d3 --build-arg VLLM_REPO=https://github.com/local-inference-lab/vllm --build-arg VLLM_APPLY_PRESET_PRS=0 .*--build-arg VLLM_PRESERVE_SM12X_TARGET=1 --build-arg VLLM_PATCH_B12X_C128A_ALIGNMENT=1'
+    assert_log_contains '^docker build -t vllm-node-b12x .*--build-context flashinfer_wheels=\./\.wheel-cache/flashinfer/regular --build-context vllm_wheels=\./\.wheel-cache/vllm/b12x .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 '
     assert_log_contains '.*--build-arg B12X_CACHEBUST=[0-9]+'
     assert_log_not_contains 'Dockerfile\.mxfp4'
     assert_output_contains 'Rebuilding vLLM wheels \(--exp-b12x preset\)\.\.\.'
-    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref master for https://github\.com/local-inference-lab/vllm ref dev/jovian-judgement\.'
+    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref 75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 for https://github\.com/local-inference-lab/vllm ref aba94d396d27ea92a2044ad024c003b36da505d3\.'
     pass "--exp-b12x --rebuild-vllm uses the B12X source-build profile"
 }
 
 test_exp_b12x_allows_vllm_prs() {
     setup_fixture
     run_build --exp-b12x --apply-vllm-pr 12345 || fail "--exp-b12x with vLLM PR run failed"
-    assert_log_contains '^docker build --target vllm-export .*--build-arg VLLM_REF=dev/jovian-judgement --build-arg VLLM_REPO=https://github.com/local-inference-lab/vllm --build-arg VLLM_APPLY_PRESET_PRS=0 --build-arg CACHEBUST_VLLM=[0-9]+ --build-arg VLLM_PRS=12345'
+    assert_log_contains '^docker build --target vllm-export .*--build-arg VLLM_REF=aba94d396d27ea92a2044ad024c003b36da505d3 --build-arg VLLM_REPO=https://github.com/local-inference-lab/vllm --build-arg VLLM_APPLY_PRESET_PRS=0 --build-arg CACHEBUST_VLLM=[0-9]+ --build-arg VLLM_PRS=12345'
     assert_output_contains 'Rebuilding vLLM wheels \(--exp-b12x preset with requested vLLM PRs\)\.\.\.'
     assert_output_contains 'Applying vLLM PRs: 12345'
     pass "--exp-b12x accepts additional vLLM PR patches"
@@ -1127,9 +1127,9 @@ test_custom_torch_versions_are_forwarded() {
         --torchvision-version 0.27.0 \
         --torchaudio-version none || fail "custom Torch version run failed"
     assert_log_contains '^docker build --target vllm-export .*--build-arg TORCH_VERSION=2.12.0 --build-arg TORCHVISION_VERSION=0.27.0 --build-arg TORCHAUDIO_VERSION=none .*--build-arg VLLM_REF=dev/fathomless-firmament --build-arg VLLM_REPO=https://github.com/local-inference-lab/vllm.git'
-    assert_log_contains '^docker build -t vllm-node .*--build-arg TORCH_VERSION=2.12.0 --build-arg TORCHVISION_VERSION=0.27.0 --build-arg TORCHAUDIO_VERSION=none .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=master '
+    assert_log_contains '^docker build -t vllm-node .*--build-arg TORCH_VERSION=2.12.0 --build-arg TORCHVISION_VERSION=0.27.0 --build-arg TORCHAUDIO_VERSION=none .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 '
     assert_log_contains '.*--build-arg B12X_CACHEBUST=[0-9]+'
-    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref master for https://github\.com/local-inference-lab/vllm ref dev/fathomless-firmament\.'
+    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref 75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 for https://github\.com/local-inference-lab/vllm ref dev/fathomless-firmament\.'
     pass "Torch versions and the B12X source checkout are forwarded to the fork build"
 }
 
@@ -1139,8 +1139,8 @@ test_local_inference_lab_b12x_applies_to_any_ref() {
         --vllm-repo https://github.com/local-inference-lab/vllm \
         --vllm-ref dev/spark-fixes-7-14 \
         --torch-version 2.12.0 || fail "local-inference-lab alternate ref run failed"
-    assert_log_contains '^docker build -t vllm-node .*--build-arg TORCH_VERSION=2.12.0 .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=master '
-    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref master for https://github\.com/local-inference-lab/vllm ref dev/spark-fixes-7-14\.'
+    assert_log_contains '^docker build -t vllm-node .*--build-arg TORCH_VERSION=2.12.0 .*--build-arg B12X_REPO=https://github.com/lukealonso/b12x.git --build-arg B12X_REF=75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 '
+    assert_output_contains 'Building B12X from https://github\.com/lukealonso/b12x\.git ref 75ffee6375b0577ce2c8d6931ffacefda3ecbdd6 for https://github\.com/local-inference-lab/vllm ref dev/spark-fixes-7-14\.'
     pass "all local-inference-lab/vllm refs include the B12X source build"
 }
 
@@ -1236,7 +1236,9 @@ test_dockerfile_uses_profiled_named_wheel_contexts() {
 
 test_dockerfile_builds_and_verifies_b12x_source() {
     for expected in \
-        'git clone --depth 1 --branch "$B12X_REF" "$B12X_REPO" /tmp/b12x-source' \
+        'git init /tmp/b12x-source' \
+        'git -C /tmp/b12x-source fetch --depth 1 origin "$B12X_REF"' \
+        'git -C /tmp/b12x-source checkout --detach FETCH_HEAD' \
         'Refreshing B12X source (cache key: $B12X_CACHEBUST)' \
         'uv pip install --reinstall --no-deps /tmp/b12x-source' \
         "import b12x; print('Verified B12X'" \

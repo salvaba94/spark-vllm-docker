@@ -684,7 +684,11 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 # __CUDA_ARCH_FAMILY_SPECIFIC__ undefined → disables native E2M1 PTX.
 # See: vllm-project/vllm#37725
 RUN --mount=type=bind,source=mods/mandatory/vllm_cmake_arch_suffix.patch,target=/tmp/vllm_cmake_arch_suffix.patch \
-    patch -p1 < /tmp/vllm_cmake_arch_suffix.patch
+    if grep -q 'Preserves architecture-specific suffixes' cmake/utils.cmake; then \
+        echo "CUDA architecture suffix support is already present; skipping compatibility patch"; \
+    else \
+        patch --batch --forward -p1 < /tmp/vllm_cmake_arch_suffix.patch; \
+    fi
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
@@ -750,7 +754,7 @@ RUN --mount=type=bind,from=base,source=/workspace/vllm/nccl/build/pkg/deb,target
     python3 python3-pip python3-dev vim curl git wget \
     libcudnn9-cuda-13 \
     libibverbs1 libibverbs-dev rdma-core \
-    libxcb1 earlyoom \
+    libxcb1 libgl1 libglib2.0-0t64 earlyoom \
     && cd /workspace/nccl-pkg && apt install -y --no-install-recommends --allow-downgrades --allow-change-held-packages ./*.deb \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv
@@ -863,7 +867,10 @@ COPY docker/pin_cutlass_dsl.py /tmp/pin_cutlass_dsl.py
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     if [ -n "$B12X_REPO" ]; then \
         echo "Refreshing B12X source (cache key: $B12X_CACHEBUST)" && \
-        git clone --depth 1 --branch "$B12X_REF" "$B12X_REPO" /tmp/b12x-source && \
+        git init /tmp/b12x-source && \
+        git -C /tmp/b12x-source remote add origin "$B12X_REPO" && \
+        git -C /tmp/b12x-source fetch --depth 1 origin "$B12X_REF" && \
+        git -C /tmp/b12x-source checkout --detach FETCH_HEAD && \
         B12X_COMMIT=$(git -C /tmp/b12x-source rev-parse HEAD) && \
         python3 /tmp/pin_cutlass_dsl.py "$CUTLASS_DSL_VERSION" \
             --expected-count 5 /tmp/b12x-source/pyproject.toml && \

@@ -35,9 +35,14 @@ VLLM_SOURCE_STAGING_DIR=""
 VLLM_SOURCE_CONTEXT=""
 EXP_B12X=false
 EXP_B12X_VLLM_REPO="https://github.com/local-inference-lab/vllm"
-EXP_B12X_VLLM_REF="dev/jovian-judgement"
+# Keep the local source build on the exact vLLM/B12X pair published in the
+# tested B12X runner. The development branch can move incompatibly between
+# builds (for example, while changing managed-weight allocation semantics).
+EXP_B12X_VLLM_REF="aba94d396d27ea92a2044ad024c003b36da505d3"
 B12X_PACKAGE_REPO="https://github.com/lukealonso/b12x.git"
-B12X_PACKAGE_REF="master"
+# Pin the B12X integration paired with the tested vLLM image. Newer B12X master
+# revisions can depend on loader APIs that have not landed in this vLLM branch.
+B12X_PACKAGE_REF="75ffee6375b0577ce2c8d6931ffacefda3ecbdd6"
 EXP_B12X_TORCH_VERSION="2.13.0"
 EXP_B12X_TORCHVISION_VERSION="0.28.0"
 EXP_B12X_TORCHAUDIO_VERSION="2.11.0"
