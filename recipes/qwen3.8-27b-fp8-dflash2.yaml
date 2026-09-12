@@ -37,6 +37,5 @@ command: |
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
     --reasoning-parser qwen3 \
-    --default-chat-template-kwargs '{{"preserve_thinking":true}}' \
-    --override-generation-config '{{"temperature":1.0,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}}' \
+    --generation-config vllm \
     --speculative-config '{{"method":"dflash","model":"z-lab/Qwen3.8-27B-DFlash2","num_speculative_tokens":{num_speculative_tokens},"draft_tensor_parallel_size":1}}'

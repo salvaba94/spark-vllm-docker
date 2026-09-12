@@ -50,6 +50,6 @@ command: |
     --speculative-config '{{"method":"mtp","num_speculative_tokens":3,"moe_backend":"triton"}}' \
     --load-format fastsafetensors \
     --reasoning-parser qwen3 \
-    --override-generation-config '{{"temperature":1.0,"top_p":0.95}}' \
+    --generation-config vllm \
     --tool-call-parser qwen3_xml \
     --enable-auto-tool-choice

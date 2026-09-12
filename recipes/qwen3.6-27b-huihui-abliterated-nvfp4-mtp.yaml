@@ -45,6 +45,5 @@ command: |
     --enable-auto-tool-choice \
     --reasoning-parser qwen3 \
     --tool-call-parser qwen3_xml \
-    --default-chat-template-kwargs '{{"preserve_thinking":true}}' \
-    --override-generation-config '{{"temperature":0.7,"top_p":0.95,"top_k":20}}' \
+    --generation-config vllm \
     --speculative-config '{{"method":"mtp","num_speculative_tokens":{num_speculative_tokens}}}'

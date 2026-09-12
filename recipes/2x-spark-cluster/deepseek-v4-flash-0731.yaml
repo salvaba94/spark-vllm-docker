@@ -63,10 +63,8 @@ command: |
       --tool-call-parser deepseek_v4 \
       --enable-auto-tool-choice \
       --reasoning-parser deepseek_v4 \
-      --override-generation-config '{{"temperature":1.0,"top_p":0.95}}' \
+      --generation-config vllm \
       --reasoning-config '{{"reasoning_parser":"deepseek_v4","reasoning_start_str":"","reasoning_end_str":""}}' \
-      --default-chat-template-kwargs.thinking=true \
-      --default-chat-template-kwargs.reasoning_effort=high \
       --load-format instanttensor \
       --moe-backend b12x \
       --linear-backend b12x \
