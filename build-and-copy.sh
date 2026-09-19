@@ -8,7 +8,6 @@ START_TIME=$(date +%s)
 IMAGE_TAG="vllm-node"
 IMAGE_TAG_SET=false
 PREBUILT_RUNNER_IMAGE="eugr/spark-vllm:latest"
-PREBUILT_RUNNER_IMAGE_SET=false
 PREBUILT_B12X_RUNNER_IMAGE="eugr/spark-vllm-b12x:latest"
 USE_WHEELS=false
 REBUILD_FLASHINFER=false
@@ -35,20 +34,16 @@ VLLM_SOURCE_STAGING_DIR=""
 VLLM_SOURCE_CONTEXT=""
 EXP_B12X=false
 EXP_B12X_VLLM_REPO="https://github.com/local-inference-lab/vllm"
-# Keep the local source build on the exact vLLM/B12X pair published in the
-# tested B12X runner. The development branch can move incompatibly between
-# builds (for example, while changing managed-weight allocation semantics).
-EXP_B12X_VLLM_REF="aba94d396d27ea92a2044ad024c003b36da505d3"
+EXP_B12X_VLLM_REF="dev/karmic-kraken"
 B12X_PACKAGE_REPO="https://github.com/lukealonso/b12x.git"
-# Pin the B12X integration paired with the tested vLLM image. Newer B12X master
-# revisions can depend on loader APIs that have not landed in this vLLM branch.
-B12X_PACKAGE_REF="75ffee6375b0577ce2c8d6931ffacefda3ecbdd6"
+B12X_PACKAGE_REF="master"
 EXP_B12X_TORCH_VERSION="2.13.0"
 EXP_B12X_TORCHVISION_VERSION="0.28.0"
 EXP_B12X_TORCHAUDIO_VERSION="2.11.0"
 B12X_REPO=""
 B12X_REF=""
 B12X_CACHEBUST=""
+B12X_FROM_PYPI=0
 FLASHINFER_REF="main"
 FLASHINFER_REF_SET=false
 TMP_IMAGE=""
@@ -58,11 +53,8 @@ VLLM_PRS=""
 APPLY_PRESET_VLLM_PRS=false
 FLASHINFER_PRS=""
 # Deprecated --tf5 aliases are kept for tag compatibility only; they no longer alter dependency resolution.
-VLLM_OMNI_REF="main"
-REBUILD_VLLM_OMNI=false
 PRE_TRANSFORMERS=false
 FULL_LOG=false
-FORCE_REBUILD=false
 BUILD_JOBS="16"
 BUILD_JOBS_SET=false
 DEFAULT_GPU_ARCH_LIST="12.1a"
@@ -127,6 +119,7 @@ generate_build_metadata() {
     local b12x_repo="${13}"
     local b12x_ref="${14}"
     local cutlass_dsl_version="${15}"
+    local b12x_from_pypi="${16:-0}"
 
     local base_image
     base_image=$(grep -m1 '^FROM .* AS runner' "$dockerfile" | awk '{print $2}')
@@ -148,6 +141,7 @@ build_args:
   cutlass_dsl_version: "${cutlass_dsl_version}"
   b12x_repo: "${b12x_repo}"
   b12x_ref: "${b12x_ref}"
+  b12x_from_pypi: ${b12x_from_pypi}
   transformers_5: ${transformers_5}
   exp_mxfp4: ${exp_mxfp4}
   vllm_prs: "${vllm_prs}"
@@ -608,7 +602,6 @@ promote_wheel_set() {
 usage() {
     echo "Usage: $0 [OPTIONS]"
     echo "  -t, --tag <tag>               : Local image tag (default: 'vllm-node'; preset tags: 'vllm-node-tf5', 'vllm-node-mxfp4', or 'vllm-node-b12x')"
-    echo "  --prebuilt-runner-image <img> : Pull this exact prebuilt runner instead of the default eugr image"
     echo "  --use-wheels                  : Build only the runner from precompiled wheels; never implicitly build source."
     echo "  --gpu-arch <arch>             : GPU architecture for NCCL, wheel, and source builds (default: '${DEFAULT_GPU_ARCH_LIST}')"
     echo "  --rebuild-flashinfer          : Force rebuild of FlashInfer wheels (ignore cached wheels)"
@@ -634,8 +627,6 @@ usage() {
     echo "  --apply-vllm-pr <pr-or-url>   : Apply a vLLM PR number or full GitHub PR URL to source. Can be specified multiple times."
     echo "  --apply-preset-vllm-prs       : Apply preset vLLM PRs even with --vllm-repo, --vllm-ref, or --apply-vllm-pr."
     echo "  --apply-flashinfer-pr <pr-num>: Apply a specific PR patch to FlashInfer source. Can be specified multiple times."
-    echo "  --vllm-omni-ref <ref>         : vLLM-Omni branch, tag or SHA to install (default: 'main')"
-    echo "  --rebuild-vllm-omni           : Force re-clone and reinstall of vLLM-Omni (bust the git cache)"
     echo "  --full-log                    : Enable full build logging (--progress=plain)"
     echo "  --no-build                    : Skip building, only copy image (requires --copy-to)"
     echo "  --network <network>           : Docker network to use during build"
@@ -667,16 +658,6 @@ CONFIG_FILE_SET=false
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         -t|--tag) IMAGE_TAG="$2"; IMAGE_TAG_SET=true; shift ;;
-        --prebuilt-runner-image)
-            if [ -n "$2" ] && [[ "$2" != -* ]]; then
-                PREBUILT_RUNNER_IMAGE="$2"
-                PREBUILT_RUNNER_IMAGE_SET=true
-                shift
-            else
-                echo "Error: --prebuilt-runner-image requires an image reference."
-                exit 1
-            fi
-            ;;
         --use-wheels) USE_WHEELS=true ;;
         --gpu-arch) GPU_ARCH_LIST="$2"; GPU_ARCH_SET=true; shift ;;
         --rebuild-flashinfer) REBUILD_FLASHINFER=true ;;
@@ -786,9 +767,6 @@ while [[ "$#" -gt 0 ]]; do
                exit 1
             fi
             ;;
-        --vllm-omni-ref) VLLM_OMNI_REF="$2"; REBUILD_VLLM_OMNI=true; shift ;;
-        --rebuild-vllm-omni) REBUILD_VLLM_OMNI=true ;;
-        --force-rebuild) FORCE_REBUILD=true; REBUILD_FLASHINFER=true; REBUILD_VLLM=true ;;
         --full-log) FULL_LOG=true ;;
         --no-build) NO_BUILD=true ;;
         --cleanup) CLEANUP_MODE=true ;;
@@ -812,7 +790,6 @@ done
 # The B12X preset uses the standard Dockerfile and source-build path, but owns
 # the fork/ref and Torch-family versions needed by that integration.
 if [ "$EXP_B12X" = true ]; then
-    if [ "$PREBUILT_RUNNER_IMAGE_SET" = true ]; then echo "Error: --exp-b12x is incompatible with --prebuilt-runner-image"; exit 1; fi
     if [ "$EXP_MXFP4" = true ]; then echo "Error: --exp-b12x is incompatible with --exp-mxfp4"; exit 1; fi
     if [ "$USE_WHEELS" = true ]; then echo "Error: --exp-b12x is incompatible with --use-wheels because B12X vLLM wheels are not published"; exit 1; fi
     if [ "$VLLM_REPO_SET" = true ]; then echo "Error: --exp-b12x is incompatible with --vllm-repo"; exit 1; fi
@@ -883,15 +860,20 @@ NORMALIZED_DEFAULT_VLLM_REPO="${DEFAULT_VLLM_REPO%/}"
 NORMALIZED_DEFAULT_VLLM_REPO="${NORMALIZED_DEFAULT_VLLM_REPO%.git}"
 if [ "$NORMALIZED_VLLM_REPO" = "$NORMALIZED_DEFAULT_VLLM_REPO" ] || \
    [ "$NORMALIZED_VLLM_REPO" = "$EXP_B12X_VLLM_REPO" ]; then
-    B12X_REPO="$B12X_PACKAGE_REPO"
-    B12X_REF="$B12X_PACKAGE_REF"
     B12X_CACHEBUST="$(date +%s)"
     TORCH_BASE_VERSION="${TORCH_VERSION%%+*}"
     if [ "$(printf '%s\n' "2.12.0" "$TORCH_BASE_VERSION" | sort -V | head -n1)" != "2.12.0" ]; then
         echo "Error: ${NORMALIZED_VLLM_REPO} requires --torch-version 2.12.0 or newer for B12X (got ${TORCH_VERSION})."
         exit 1
     fi
-    echo "Building B12X from ${B12X_REPO} ref ${B12X_REF} for ${NORMALIZED_VLLM_REPO} ref ${VLLM_REF}."
+    if [ "$NORMALIZED_VLLM_REPO" = "$EXP_B12X_VLLM_REPO" ]; then
+        B12X_REPO="$B12X_PACKAGE_REPO"
+        B12X_REF="$B12X_PACKAGE_REF"
+        echo "Building B12X from ${B12X_REPO} ref ${B12X_REF} for ${NORMALIZED_VLLM_REPO} ref ${VLLM_REF}."
+    else
+        B12X_FROM_PYPI=1
+        echo "Installing latest B12X from PyPI for ${NORMALIZED_VLLM_REPO} ref ${VLLM_REF}."
+    fi
 fi
 
 # Source autodiscover.sh to load .env file
@@ -1037,11 +1019,6 @@ if [ -n "$VLLM_PRS" ]; then CUSTOM_BUILD_REQUESTED=true; fi
 if [ "$APPLY_PRESET_VLLM_PRS" = true ]; then CUSTOM_BUILD_REQUESTED=true; fi
 if [ -n "$FLASHINFER_PRS" ]; then CUSTOM_BUILD_REQUESTED=true; fi
 
-if [ "$PREBUILT_RUNNER_IMAGE_SET" = true ] && [ "$CUSTOM_BUILD_REQUESTED" = true ]; then
-    echo "Error: --prebuilt-runner-image cannot be combined with source, wheel, or custom build options." >&2
-    exit 1
-fi
-
 # Only local wheel/image builds consume the wheel cache. A normal default invocation
 # still pulls the prebuilt runner even if the local wheel cache targets another
 # architecture. --use-wheels never compiles implicitly, so reject an unsafe
@@ -1108,7 +1085,6 @@ if [ "$FULL_LOG" = true ]; then
     COMMON_BUILD_FLAGS+=("--progress=plain")
 fi
 COMMON_BUILD_FLAGS+=("--build-arg" "BUILD_JOBS=$BUILD_JOBS")
-# Keep vLLM, FlashInfer, and NCCL builds aligned with the selected GPU target.
 COMMON_BUILD_FLAGS+=("--build-arg" "TORCH_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
 COMMON_BUILD_FLAGS+=("--build-arg" "FLASHINFER_CUDA_ARCH_LIST=$GPU_ARCH_LIST")
 if [ "$EXP_MXFP4" = false ]; then
@@ -1162,26 +1138,13 @@ if [ "$NO_BUILD" = false ]; then
             "mxfp4-pinned" "false" "true" "" "$MXFP4_VLLM_REPO" "base-image" \
             "base-image" "base-image" "disabled" "disabled" "base-image"
 
-        CMD=("docker" "build" "-t" "$IMAGE_TAG" "${COMMON_BUILD_FLAGS[@]}"
-            "--build-arg" "VLLM_OMNI_REF=$VLLM_OMNI_REF")
-        if [ "$REBUILD_VLLM_OMNI" = true ]; then
-            CMD+=("--build-arg" "CACHEBUST_VLLM_OMNI=$(date +%s)")
-        fi
-        CMD+=("-f" "Dockerfile.mxfp4" ".")
+        CMD=("docker" "build" "-t" "$IMAGE_TAG" "${COMMON_BUILD_FLAGS[@]}" "-f" "Dockerfile.mxfp4" ".")
         echo "Building image with command: ${CMD[*]}"
         BUILD_START=$(date +%s)
         "${CMD[@]}"
         BUILD_END=$(date +%s)
         RUNNER_BUILD_TIME=$((BUILD_END - BUILD_START))
     else
-        # ----------------------------------------------------------
-        # Phase 0: Force-rebuild — delete existing wheels
-        # ----------------------------------------------------------
-        if [ "$FORCE_REBUILD" = true ]; then
-            echo "Force rebuild: deleting existing wheels..."
-            rm -f ./wheels/flashinfer*.whl ./wheels/vllm*.whl 2>/dev/null || true
-        fi
-
         # ----------------------------------------------------------
         # Phase 1: FlashInfer wheels
         # ----------------------------------------------------------
@@ -1380,7 +1343,7 @@ if [ "$NO_BUILD" = false ]; then
         generate_build_metadata Dockerfile "$VLLM_VERSION" "$VLLM_COMMIT" "$FLASHINFER_COMMIT" \
             "$VLLM_REF" "true" "false" "$VLLM_PRS" "$VLLM_REPO" "$TORCH_VERSION" \
             "${TORCHVISION_VERSION:-resolver-selected}" "${TORCHAUDIO_VERSION:-resolver-selected}" \
-            "${B12X_REPO:-disabled}" "${B12X_REF:-disabled}" "$CUTLASS_DSL_VERSION"
+            "${B12X_REPO:-disabled}" "${B12X_REF:-disabled}" "$CUTLASS_DSL_VERSION" "$B12X_FROM_PYPI"
 
         RUNNER_CMD=("docker" "build"
             "-t" "$IMAGE_TAG"
@@ -1391,17 +1354,11 @@ if [ "$NO_BUILD" = false ]; then
         if [ -n "$B12X_REPO" ]; then
             RUNNER_CMD+=("--build-arg" "B12X_REPO=$B12X_REPO")
             RUNNER_CMD+=("--build-arg" "B12X_REF=$B12X_REF")
+        elif [ "$B12X_FROM_PYPI" = "1" ]; then
+            RUNNER_CMD+=("--build-arg" "B12X_FROM_PYPI=$B12X_FROM_PYPI")
+        fi
+        if [ -n "$B12X_CACHEBUST" ]; then
             RUNNER_CMD+=("--build-arg" "B12X_CACHEBUST=$B12X_CACHEBUST")
-        fi
-
-        if [ "$PRE_TRANSFORMERS" = true ]; then
-            echo "Using transformers>=5.0.0..."
-            RUNNER_CMD+=("--build-arg" "PRE_TRANSFORMERS=1")
-        fi
-
-        RUNNER_CMD+=("--build-arg" "VLLM_OMNI_REF=$VLLM_OMNI_REF")
-        if [ "$REBUILD_VLLM_OMNI" = true ]; then
-            RUNNER_CMD+=("--build-arg" "CACHEBUST_VLLM_OMNI=$(date +%s)")
         fi
 
         RUNNER_CMD+=(".")

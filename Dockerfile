@@ -11,6 +11,7 @@ ARG CUTLASS_DSL_VERSION=4.7.0
 ARG B12X_REPO=""
 ARG B12X_REF=""
 ARG B12X_CACHEBUST=""
+ARG B12X_FROM_PYPI=0
 
 # Empty fallback for ordinary remote-source builds. A caller may override this
 # stage with --build-context vllm_source=/path/to/checkout.
@@ -96,7 +97,7 @@ ENV CMAKE_CXX_COMPILER_LAUNCHER=ccache
 ENV CMAKE_CUDA_COMPILER_LAUNCHER=ccache
 
 # 2. Set Environment Variables
-ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ARG NCCL_NVCC_GENCODE
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
@@ -120,6 +121,8 @@ FROM base AS flashinfer-builder
 
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
+# The provider shim accepts the same space-separated dotted architectures.
+ENV FLASHINFER_JIT_CACHE_PROVIDER_ARCHS=${FLASHINFER_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
 ARG FLASHINFER_REF=main
 ARG FLASHINFER_BUILD_PYTHON=/usr/bin/python3
@@ -162,35 +165,6 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
     cp -a /repo-cache/flashinfer /workspace/flashinfer
 
 WORKDIR /workspace/flashinfer
-
-# Pin CUTLASS to v4.4.2 — fixes grouped GEMM SMEM stage count (PR #3092),
-# TMA descriptor alignment (#2905/#2906), and zero-stride TMA basis.
-# FlashInfer PR #2798 merged this, but we pin explicitly to be safe.
-# Reference: https://github.com/NVIDIA/cutlass/issues/3096
-RUN cd 3rdparty/cutlass && \
-    git fetch origin && \
-    git checkout v4.4.2 && \
-    cd ../..
-
-# Apply K=64 SM120 block-scaled MoE GEMM patch (PR #2786 still open)
-# Enables 7-11 pipeline stages vs 2 with K=128, giving ~2x decode throughput.
-# - EffBlk_SF clamping in sm120_blockscaled_mma_builder.inl
-# - K=64 tile shapes in are_tile_shapes_supported_sm120
-# - K=64 CTA shapes in generate_kernels.py
-# Reference: https://github.com/flashinfer-ai/flashinfer/pull/2786
-#            https://github.com/NVIDIA/cutlass/issues/3096
-RUN --mount=type=bind,source=mods/mandatory/flashinfer_k64_sm120_v442.patch,target=/tmp/flashinfer_k64_sm120_v442.patch \
-    patch -p1 < /tmp/flashinfer_k64_sm120_v442.patch
-
-# Enable GDC (Grid Dependency Control) for SM100+ in ALL FlashInfer compilation paths.
-# Without this, PDL barriers (griddepcontrol.wait/launch_dependents) compile as no-ops,
-# causing race conditions between dependent MoE kernels → illegal instruction during
-# CUDA graph capture. The env var is picked up by build_cuda_cflags() in cpp_ext.py,
-# which covers both the JIT path (via core.py) AND the AOT path (fused_moe, fp4_quantization)
-# that uses CompilationContext.get_nvcc_flags_list() — a separate code path that the
-# previous core.py sed didn't reach.
-# Reference: FlashInfer PR #2780
-ENV FLASHINFER_EXTRA_CUDAFLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
 
 ARG FLASHINFER_PRS=""
 
@@ -255,23 +229,13 @@ RUN set -eux; \
         echo "Final FlashInfer source after PR application: requested $FLASHINFER_REF ($FLASHINFER_REQUESTED_HEAD), final $(git describe --tags --always --dirty)."; \
     fi
 
-# Fix TRT-LLM quantization_utils.cuh for SM121: add software E2M1 conversion
-# fallback ONLY in the low-level fp32_vec_to_e2m1 functions.
-# IMPORTANT: Do NOT globally exclude SM121 from all >= 1000 guards — the
-# higher-level wrapper functions (cvt_warp_fp16_to_fp4, etc.) must be allowed
-# to enter the >= 1000 path on SM121. They do generic float math and call
-# fp32_vec_to_e2m1 which has the software fallback. Excluding SM121 from
-# the wrappers causes them to return 0 with uninitialized scale factors → NaN.
-# Reference: https://github.com/Avarok-Cybersecurity/dgx-vllm
-COPY mods/mandatory/fix_quantization_utils_sm121.py .
-RUN python3 fix_quantization_utils_sm121.py
 
-# Apply patch to avoid re-downloading existing cubins
-RUN --mount=type=bind,source=mods/mandatory/flashinfer_cache.patch,target=/tmp/flashinfer_cache.patch \
-    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+
+# FlashInfer #5240 reuses checksum-verified cubins from the cache mount below.
+COPY docker/build_flashinfer_jit_providers.sh /tmp/build_flashinfer_jit_providers.sh
+RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=cubins-cache,target=/workspace/flashinfer/flashinfer-cubin/flashinfer_cubin/cubins \
-    patch -p1 < /tmp/flashinfer_cache.patch && \
     # flashinfer-python
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
     "$FLASHINFER_BUILD_PYTHON" -c 'import filelock, packaging, requests, torch, tqdm' && \
@@ -279,7 +243,8 @@ RUN --mount=type=bind,source=mods/mandatory/flashinfer_cache.patch,target=/tmp/f
     # flashinfer-cubin
     cd flashinfer-cubin && uv build --python "$FLASHINFER_BUILD_PYTHON" --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
     # flashinfer-jit-cache
-    cd ../flashinfer-jit-cache && \
+    cd .. && bash /tmp/build_flashinfer_jit_providers.sh "$FLASHINFER_BUILD_PYTHON" /workspace/wheels && \
+    cd flashinfer-jit-cache && \
     uv build --python "$FLASHINFER_BUILD_PYTHON" --no-build-isolation --wheel . --out-dir=/workspace/wheels -v && \
     # dump git ref and target architecture in the wheels dir
     cd .. && \
@@ -311,7 +276,7 @@ RUN apt update && \
     rustc --version && \
     cargo --version
 
-ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 WORKDIR $VLLM_BASE_DIR
 
@@ -563,6 +528,14 @@ RUN set -eux; \
 # the fix (idempotent); unknown partial source shapes fail the build.
 COPY docker/patch_vllm_*.py docker/pin_cutlass_dsl.py /tmp/vllm-patches/
 
+# TEMPORARY PATCH: vLLM PR #53007 / d29c88f162a3 chooses a large SWA
+# kernel block even when the backend cannot run the primary block unsplit.
+# On FlashInfer SM12x, 64 does not divide Qwen3.8's 1648-token page, so
+# DFlash2 pages become mostly padding. Preserve the PR's supported-primary
+# path and restore the smallest-block fallback. Remove once supported refs
+# contain an equivalent upstream fix; unexpected source layouts fail closed.
+RUN python3 /tmp/vllm-patches/patch_vllm_swa_block_size.py .
+
 # TEMPORARY PATCH: vLLM PR #53306 added a preliminary CUDA-graph memory
 # profiling capture, but only redirects the main graph manager and existing
 # wrappers to its throwaway pool. MTP and other autoregressive speculators own
@@ -668,6 +641,14 @@ RUN python3 /tmp/vllm-patches/patch_vllm_routed_experts_weight_shape.py .
 # reservations behind just before vLLM sizes and allocates KV cache blocks.
 RUN python3 /tmp/vllm-patches/patch_vllm_spark_kv_cache_cleanup.py .
 
+# TEMPORARY PATCH: local-inference-lab/vllm 3d5f2b04 exports temporary MoE
+# tuning tensors as PreparedCall.owners, which b12x retains in serving plans.
+# Keep the trial lifetime in call closures so KV profiling can reclaim them.
+RUN python3 /tmp/vllm-patches/patch_vllm_b12x_moe_tuning_memory.py .
+
+# WSL guest RAM does not describe CUDA's allocation budget on UMA devices.
+# Keep the fix in exported wheels as well as the runner below.
+RUN python3 /tmp/vllm-patches/patch_vllm_wsl_cuda_uma.py .
 
 # Prepare build requirements
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
@@ -679,16 +660,17 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     sed -i '/^fastsafetensors\b/d' requirements/test/cuda.txt && \
     uv pip install -r requirements/build/cuda.txt "setuptools-rust>=1.9.0"
 
-# Fix cmake to preserve arch suffix (a/f) and add SM121 to supported archs.
-# Without this, cmake compiles as sm_120 instead of sm_121a, leaving
-# __CUDA_ARCH_FAMILY_SPECIFIC__ undefined → disables native E2M1 PTX.
-# See: vllm-project/vllm#37725
-RUN --mount=type=bind,source=mods/mandatory/vllm_cmake_arch_suffix.patch,target=/tmp/vllm_cmake_arch_suffix.patch \
-    if grep -q 'Preserves architecture-specific suffixes' cmake/utils.cmake; then \
-        echo "CUDA architecture suffix support is already present; skipping compatibility patch"; \
-    else \
-        patch --batch --forward -p1 < /tmp/vllm_cmake_arch_suffix.patch; \
-    fi
+# Apply Patches
+# TEMPORARY PATCH for fastsafetensors loading in cluster setup - tracking https://github.com/vllm-project/vllm/issues/34180
+# COPY fastsafetensors.patch .
+# RUN if patch -p1 --dry-run --reverse < fastsafetensors.patch &>/dev/null; then \
+#         echo "PR #34180 is already applied"; \
+#     else \
+#         patch -p1 < fastsafetensors.patch; \
+#     fi
+# TEMPORARY PATCH for broken vLLM build (unguarded Hopper code) - reverting PR #34758 and #34302
+# RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34758.diff | patch -p1 -R || echo "Cannot revert PR #34758, skipping"
+# RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/34302.diff | patch -p1 -R || echo "Cannot revert PR #34302, skipping"
 
 # Final Compilation
 RUN --mount=type=cache,id=ccache,target=/root/.ccache \
@@ -723,6 +705,7 @@ ARG CUTLASS_DSL_VERSION
 ARG B12X_REPO
 ARG B12X_REF
 ARG B12X_CACHEBUST
+ARG B12X_FROM_PYPI
 
 # Transferring build settings from build image because of ptxas/jit compilation during vLLM startup
 # Build parallemism
@@ -754,7 +737,7 @@ RUN --mount=type=bind,from=base,source=/workspace/vllm/nccl/build/pkg/deb,target
     python3 python3-pip python3-dev vim curl git wget \
     libcudnn9-cuda-13 \
     libibverbs1 libibverbs-dev rdma-core \
-    libxcb1 libgl1 libglib2.0-0t64 earlyoom \
+    libxcb1 earlyoom liburing-dev pkg-config \
     && cd /workspace/nccl-pkg && apt install -y --no-install-recommends --allow-downgrades --allow-change-held-packages ./*.deb \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv
@@ -811,14 +794,20 @@ RUN --mount=type=bind,from=flashinfer_wheels,target=/workspace/flashinfer-wheels
         --override /tmp/wheel-override.txt
 
 # Setup environment for runtime
-ARG TORCH_CUDA_ARCH_LIST="12.0a;12.1a"
+ARG TORCH_CUDA_ARCH_LIST="12.1a"
 ENV TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 ARG FLASHINFER_CUDA_ARCH_LIST="12.1a"
 ENV FLASHINFER_CUDA_ARCH_LIST=${FLASHINFER_CUDA_ARCH_LIST}
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
-ENV FLASHINFER_EXTRA_CUDAFLAGS="-DCUTLASS_ENABLE_GDC_FOR_SM100=1"
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 ENV PATH=$VLLM_BASE_DIR:$PATH
+# Enable vLLM's WSL2 pinned-memory path; override with -e VLLM_WSL2_ENABLE_PIN_MEMORY=0.
+ENV VLLM_WSL2_ENABLE_PIN_MEMORY=1
+# Limit InstantTensor's in-flight I/O to reduce GPU and pinned host buffer usage.
+# Override per launch with -e INSTANTTENSOR_IO_DEPTH=<depth>.
+ENV INSTANTTENSOR_IO_DEPTH=16
+# TODO: Make the B12X autotuning default architecture dependent.
+# ENV B12X_AUTOTUNE=0
 
 
 # Final extra deps
@@ -836,41 +825,18 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install ray[default] fastsafetensors instanttensor \
         --override /tmp/torch-override.txt
 
-# Install vLLM-Omni (multimodal generation extension for vLLM)
-# Ref: https://docs.vllm.ai/projects/vllm-omni/en/latest/getting_started/installation/gpu/#build-wheel-from-source
-ARG VLLM_OMNI_REF=main
-ARG CACHEBUST_VLLM_OMNI=1
-RUN --mount=type=cache,id=git-vllm-omni,target=/git-cache/vllm-omni \
-    --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    if [ -d /git-cache/vllm-omni/.git ] && [ -d /git-cache/vllm-omni/.git/objects ]; then \
-        echo "Cache hit: Fetching vLLM-Omni updates..." && \
-        cp -a /git-cache/vllm-omni /workspace/vllm-omni && \
-        cd /workspace/vllm-omni && \
-        git fetch origin && git fetch origin --tags --force; \
-    else \
-        echo "Cache miss: Cloning vLLM-Omni from scratch..." && \
-        rm -rf /git-cache/vllm-omni/* /git-cache/vllm-omni/.* 2>/dev/null || true && \
-        git clone https://github.com/vllm-project/vllm-omni.git /workspace/vllm-omni && \
-        cp -a /workspace/vllm-omni/. /git-cache/vllm-omni/; \
-    fi && \
-    cd /workspace/vllm-omni && \
-    (git checkout --detach origin/${VLLM_OMNI_REF} 2>/dev/null || git checkout ${VLLM_OMNI_REF}) && \
-    uv pip install .
-
 # Upstream vLLM and the local-inference-lab fork consume the external B12X
-# kernel package at runtime. Build B12X from its source repository but
-# install it without dependencies: vLLM already provides the runtime packages
-# and this image deliberately advances nvidia-cutlass-dsl to 4.7.0 for both
+# kernel package at runtime. Regular builds use the latest PyPI release;
+# experimental fork builds use source. Install without dependencies: vLLM
+# already provides the runtime packages, and this image deliberately advances
+# nvidia-cutlass-dsl to 4.7.0 for both
 # regular and B12X builds. B12X kernels remain JIT-compiled on first use;
 # building its Python wheel here does not compile the CUDA kernels.
 COPY docker/pin_cutlass_dsl.py /tmp/pin_cutlass_dsl.py
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     if [ -n "$B12X_REPO" ]; then \
         echo "Refreshing B12X source (cache key: $B12X_CACHEBUST)" && \
-        git init /tmp/b12x-source && \
-        git -C /tmp/b12x-source remote add origin "$B12X_REPO" && \
-        git -C /tmp/b12x-source fetch --depth 1 origin "$B12X_REF" && \
-        git -C /tmp/b12x-source checkout --detach FETCH_HEAD && \
+        git clone --depth 1 --branch "$B12X_REF" "$B12X_REPO" /tmp/b12x-source && \
         B12X_COMMIT=$(git -C /tmp/b12x-source rev-parse HEAD) && \
         python3 /tmp/pin_cutlass_dsl.py "$CUTLASS_DSL_VERSION" \
             --expected-count 5 /tmp/b12x-source/pyproject.toml && \
@@ -878,10 +844,28 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
         printf '%s\n' "$B12X_COMMIT" > /workspace/b12x-source-commit && \
         python3 -c "import importlib.metadata as m, sys; import b12x; print('Verified B12X', m.version('b12x'), 'from source commit', sys.argv[1], 'with CUTLASS DSL', m.version('nvidia-cutlass-dsl'))" "$B12X_COMMIT" && \
         rm -rf /tmp/b12x-source; \
+    elif [ "$B12X_FROM_PYPI" = "1" ]; then \
+        echo "Refreshing B12X from PyPI (cache key: $B12X_CACHEBUST)" && \
+        uv pip install --upgrade --refresh-package b12x --no-deps --index-url https://pypi.org/simple b12x && \
+        python3 -c "import importlib.metadata as m; import b12x; print('Verified B12X', m.version('b12x'), 'from PyPI with CUTLASS DSL', m.version('nvidia-cutlass-dsl'))"; \
     else \
-        echo "B12X source build not requested; skipping."; \
+        echo "B12X installation not requested; skipping."; \
     fi
 
+# Cached or downloaded wheels can predate the CUDA-on-WSL reporting fix.
+# This also accepts wheels that already contain the source-stage patch.
+COPY docker/patch_vllm_wsl_cuda_uma.py /tmp/vllm-patches/patch_vllm_wsl_cuda_uma.py
+RUN python3 /tmp/vllm-patches/patch_vllm_wsl_cuda_uma.py --installed
+
+# InstantTensor must share vLLM's available-memory accounting on native UMA
+# and WSL. Apply after all package installs for regular, B12X, and wheel runners.
+COPY docker/patch_instanttensor_vllm_memory.py /tmp/instanttensor-patches/patch_instanttensor_vllm_memory.py
+RUN python3 /tmp/instanttensor-patches/patch_instanttensor_vllm_memory.py --installed
+
+# Enumerate Torch schema arguments once per fill_defaults call. Apply after all
+# package installs so regular, B12X, and precompiled-wheel runners retain the fix.
+COPY docker/patch_torch_schema_enumeration.py /tmp/torch-patches/patch_torch_schema_enumeration.py
+RUN python3 /tmp/torch-patches/patch_torch_schema_enumeration.py --installed
 
 # Fix NCCL
 RUN rm /usr/local/lib/python3.12/dist-packages/nvidia/nccl/lib/libnccl.so.2 && \
