@@ -4,7 +4,7 @@ description: Experimental vLLM adapter for RadixArk Qwen3.8 27B NVFP4 with the R
 model: RadixArk/Qwen3.8-27B-NVFP4
 solo_only: true
 container: vllm-node
-build_args: [--rebuild-vllm, --vllm-ref, main]
+build_args: [--rebuild-flashinfer, --rebuild-vllm, --vllm-ref, main]
 mods:
   - mods/radixark-dspark
 defaults:
