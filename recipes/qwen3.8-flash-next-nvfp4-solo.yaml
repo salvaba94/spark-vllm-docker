@@ -27,7 +27,7 @@ defaults:
   max_model_len: 262144
   max_num_seqs: 8
   max_num_batched_tokens: 4096
-  num_speculative_tokens: 4
+  num_speculative_tokens: 3
   gpu_memory_utilization: 0.8
 
 env:

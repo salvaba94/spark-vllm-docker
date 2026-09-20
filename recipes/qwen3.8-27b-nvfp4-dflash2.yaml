@@ -34,6 +34,7 @@ command: |
     --enable-chunked-prefill \
     --async-scheduling \
     --enable-prefix-caching \
+    --no-enable-flashinfer-autotune \
     --speculative-config '{{"method":"dflash","model":"z-lab/Qwen3.8-27B-DFlash2","num_speculative_tokens":{num_speculative_tokens},"draft_tensor_parallel_size":{tensor_parallel}}}' \
     --load-format instanttensor \
     --reasoning-parser qwen3 \

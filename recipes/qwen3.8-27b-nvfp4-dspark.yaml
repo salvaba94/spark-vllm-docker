@@ -35,6 +35,7 @@ command: |
     --enable-prefix-caching \
     --enable-chunked-prefill \
     --async-scheduling \
+    --no-enable-flashinfer-autotune \
     --mm-encoder-tp-mode data \
     --enable-auto-tool-choice \
     --tool-call-parser qwen3_coder \
