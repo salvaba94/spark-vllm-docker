@@ -59,6 +59,7 @@ command: |
     --enable-chunked-prefill \
     --dtype bfloat16 \
     --kv-cache-dtype fp8 \
+    --kv-cache-memory-bytes {kv_cache_memory_bytes} \
     --quantization modelopt_mixed \
     --attention-backend B12X \
     --block-size {block_size} \
