@@ -84,6 +84,7 @@ RELATED FILES:
 """
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -494,12 +495,10 @@ def check_model_exists(model: str) -> bool:
     """
     Check if a model exists in the HuggingFace cache.
 
-    Checks the standard HF cache location for completed downloads.
+    Check the current Hub snapshot for a completed local download.
 
-    EXTENSIBILITY:
-    - To support custom cache locations: Add HF_HOME env var support
-    - To verify model integrity: Check for complete snapshot with config.json
-    - To support other model sources: Add URL/path prefix detection
+    This is a local completeness check; hf-download.sh remains responsible for
+    revision and checksum verification when a download is requested.
 
     Args:
         model: HuggingFace model ID (e.g., 'org/model-name')
@@ -510,14 +509,40 @@ def check_model_exists(model: str) -> bool:
     # Convert model name to cache directory format
     # e.g., "Salyut1/GLM-4.7-NVFP4" -> "models--Salyut1--GLM-4.7-NVFP4"
     cache_name = f"models--{model.replace('/', '--')}"
-    cache_path = Path.home() / ".cache" / "huggingface" / "hub" / cache_name
+    hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+    cache_path = Path(os.environ.get("HF_HUB_CACHE", hf_home / "hub")) / cache_name
+    ref = cache_path / "refs" / "main"
+    if not ref.is_file():
+        return False
+    snapshot = cache_path / "snapshots" / ref.read_text().strip()
+    if not (snapshot / "config.json").is_file():
+        return False
+    if any((cache_path / "blobs").glob("*.incomplete")):
+        return False
+    if any(path.is_symlink() and not path.exists() for path in snapshot.rglob("*")):
+        return False
 
-    if cache_path.exists():
-        # Check for snapshots directory which indicates complete download
-        snapshots = cache_path / "snapshots"
-        if snapshots.exists() and any(snapshots.iterdir()):
-            return True
-    return False
+    weights = list(snapshot.rglob("*.safetensors"))
+    weights += list(snapshot.rglob("*.bin"))
+    if not weights:
+        return False
+    for index in snapshot.glob("*safetensors.index.json"):
+        try:
+            names = set(json.loads(index.read_text())["weight_map"].values())
+        except (OSError, ValueError, KeyError):
+            return False
+        if any(not (snapshot / name).is_file() for name in names):
+            return False
+    for weight in weights:
+        match = re.search(r"-(\d{5})-of-(\d{5})\.safetensors$", weight.name)
+        if match:
+            prefix = weight.name[: match.start()]
+            total = int(match.group(2))
+            if any(not (weight.parent / f"{prefix}-{number:05d}-of-{total:05d}.safetensors").is_file()
+                   for number in range(1, total + 1)):
+                return False
+            break
+    return True
 
 
 def generate_launch_script(
