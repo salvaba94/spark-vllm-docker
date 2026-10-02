@@ -5,7 +5,9 @@ python_root=${PYTHON_ROOT:-/usr/local/lib/python3.12/dist-packages}
 mod_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 patch_file="$mod_dir/vllm-57508.patch"
 cd "$python_root"
-if git apply --reverse --check --exclude='tests/*' "$patch_file" 2>/dev/null; then
+model_file="$python_root/vllm/model_executor/models/mimo_v2.py"
+draft_file="$python_root/vllm/model_executor/models/mimo_v2_mtp.py"
+if grep -q 'ckpt_tp: int' "$model_file" && grep -q 'ckpt_tp=' "$draft_file"; then
   echo '[mimo-v2.6-fp8-qkv] Upstream vLLM fix already present.'
 elif git apply --check --exclude='tests/*' "$patch_file"; then
   git apply --exclude='tests/*' "$patch_file"
