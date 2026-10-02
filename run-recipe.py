@@ -1320,7 +1320,7 @@ Examples:
     if model and (args.download_only or args.setup or args.force_download):
         if args.dry_run:
             model_exists = check_model_exists(model)
-            if args.force_download or not model_exists:
+            if args.force_download or not model_exists or copy_targets:
                 print(f"Would download model: {model}")
                 if copy_targets:
                     print(f"  Would copy to: {', '.join(copy_targets)}")
@@ -1332,7 +1332,9 @@ Examples:
         else:
             model_exists = check_model_exists(model)
 
-            if args.force_download or not model_exists:
+            # A local cache hit does not mean cluster workers have the model.
+            # hf-download.sh reuses the local cache and rsyncs missing files.
+            if args.force_download or not model_exists or copy_targets:
                 print("=== Downloading Model ===")
                 if not download_model(model, copy_targets):
                     print("Error: Failed to download model")

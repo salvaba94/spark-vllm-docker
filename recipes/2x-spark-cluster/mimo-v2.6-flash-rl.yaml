@@ -1,0 +1,40 @@
+# Xiaomi MiMo-V2.6-Flash-RL on two DGX Sparks. Text/coding baseline.
+recipe_version: "1"
+name: MiMo-V2.6-Flash-RL (2 Sparks)
+description: Official MiMo checkpoint with vLLM TP2 and upstream QKV loader fix
+model: XiaomiMiMo/MiMo-V2.6-Flash-RL
+container: vllm-node-b12x
+build_args:
+  - --exp-b12x
+cluster_only: true
+mods:
+  - mods/mimo-v2.6-fp8-qkv
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 2
+  max_model_len: 131072
+  max_num_seqs: 4
+  gpu_memory_utilization: 0.85
+
+env:
+  CUTE_DSL_ARCH: "sm_121a"
+  VLLM_USE_DEEP_GEMM: "0"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+
+command: |
+  vllm serve XiaomiMiMo/MiMo-V2.6-Flash-RL \
+    --host {host} \
+    --port {port} \
+    --trust-remote-code \
+    --tensor-parallel-size {tensor_parallel} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --kv-cache-dtype auto \
+    --moe-backend marlin \
+    --generation-config vllm \
+    --reasoning-parser mimo \
+    --tool-call-parser mimo \
+    --enable-auto-tool-choice
