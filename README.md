@@ -1674,6 +1674,19 @@ Building the container manually is no longer supported due to Dockerfile complex
 
 The `build-and-copy.sh` script prepares the runner image and optionally copies it to one or more nodes. By default it pulls `eugr/spark-vllm:latest` and tags it locally. Use `--use-wheels` to build only the runner from downloaded or local precompiled wheels. Source compilation happens only when an explicit source-build flag such as `--rebuild-vllm`, `--vllm-ref`, `--apply-vllm-pr`, `--rebuild-flashinfer`, `--flashinfer-ref`, or `--apply-flashinfer-pr` is supplied.
 
+To ensure any image tag is available without rebuilding an existing image, use
+`--ensure`. It checks the local tag, tries `docker pull` for a qualified
+registry tag, then follows the selected build path if the pull fails. For a
+local source-build fallback, supply the usual build flags:
+
+```bash
+./build-and-copy.sh --ensure -t registry.example/group/vllm-node:latest --rebuild-vllm --rebuild-flashinfer
+./build-and-copy.sh --ensure --exp-b12x -t registry.example/group/vllm-node-b12x:latest --rebuild-vllm --rebuild-flashinfer
+```
+
+Omit `--ensure` when an intentional rebuild is needed. `--ensure` prepares only
+the image; `run-recipe.sh <recipe> --download-only` handles model weights.
+
 **Basic usage (prepare local image):**
 
 ```bash

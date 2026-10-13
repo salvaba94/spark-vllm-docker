@@ -30,7 +30,7 @@ usage() {
     echo "  --cleanup                  : Remove unreferenced model revisions."
     echo "  --backup-dir <path>        : Existing backup directory on the head node."
     echo "  --force                    : Skip deletion/cleanup confirmation."
-    echo "  --revision <revision>      : Back up/delete one cached commit (hash, unique prefix, branch, or tag)."
+    echo "  --revision <revision>      : Download, back up, or delete one commit (hash, branch, or tag)."
     echo "  --format console|csv|json|md : Listing output format (default: console)."
     echo "  --sort <order>             : hf cache ls sort order (default: size:desc)."
     echo "  -c, --copy-to [hosts]       : Include peers. Omit hosts to use COPY_HOSTS from .env or autodiscovery."
@@ -399,8 +399,8 @@ esac
     || fail "--force requires --delete or --cleanup."
 [[ "$ACTION" != list-backup || "$COPY_TO_FLAG" == false ]] \
     || fail "Backups are listed on the head node; omit -c."
-[[ -z "$REVISION" || "$ACTION" == backup || "$ACTION" == delete ]] \
-    || fail "--revision requires --backup or --delete."
+[[ -z "$REVISION" || "$ACTION" == download || "$ACTION" == backup || "$ACTION" == delete ]] \
+    || fail "--revision requires a download, --backup, or --delete."
 [[ "$PARALLEL_COPY" == false || ( "$COPY_TO_FLAG" == true && ( "$ACTION" == download || "$ACTION" == restore ) ) ]] \
     || fail "--copy-parallel requires -c and a download or restore."
 python3 "$CACHE_HELPER" validate --model "$MODEL_NAME" --revision "$REVISION" --format "$OUTPUT_FORMAT" --sort "$SORT_ORDER"
@@ -490,7 +490,9 @@ if [[ "$ACTION" == restore ]]; then
     DOWNLOAD_TIME=$(($(date +%s) - DOWNLOAD_START))
 else
     echo "Downloading model '$MODEL_NAME' using uvx..."
-    if uvx hf download "$MODEL_NAME"; then
+    revision_args=()
+    [[ -z "$REVISION" ]] || revision_args=(--revision "$REVISION")
+    if uvx hf download "$MODEL_NAME" "${revision_args[@]}"; then
         DOWNLOAD_END=$(date +%s)
         DOWNLOAD_TIME=$((DOWNLOAD_END - DOWNLOAD_START))
         printf "Download completed in %02d:%02d:%02d\n" $((DOWNLOAD_TIME/3600)) $((DOWNLOAD_TIME%3600/60)) $((DOWNLOAD_TIME%60))

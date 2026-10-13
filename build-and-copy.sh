@@ -22,6 +22,7 @@ COPY_HOSTS=()
 COPY_TO_FLAG=false
 SSH_USER="$USER"
 NO_BUILD=false
+ENSURE_IMAGE=false
 DEFAULT_VLLM_REPO="https://github.com/vllm-project/vllm.git"
 VLLM_REPO="$DEFAULT_VLLM_REPO"
 VLLM_REPO_SET=false
@@ -653,6 +654,7 @@ usage() {
     echo "  --apply-flashinfer-pr <pr-num>: Apply a specific PR patch to FlashInfer source. Can be specified multiple times."
     echo "  --full-log                    : Enable full build logging (--progress=plain)"
     echo "  --no-build                    : Skip building, only copy image (requires --copy-to)"
+    echo "  --ensure                      : Reuse local image; try its registry tag if qualified; otherwise build with the selected options"
     echo "  --network <network>           : Docker network to use during build"
     echo "  --cleanup                     : Remove wheel files and provenance markers from all cache profiles"
     echo "  --config                      : Path to .env configuration file (default: .env in script directory)"
@@ -793,6 +795,7 @@ while [[ "$#" -gt 0 ]]; do
             ;;
         --full-log) FULL_LOG=true ;;
         --no-build) NO_BUILD=true ;;
+        --ensure) ENSURE_IMAGE=true ;;
         --cleanup) CLEANUP_MODE=true ;;
         --network)
             if [ -n "$2" ] && [[ "$2" != -* ]]; then
@@ -1013,9 +1016,34 @@ if { [ -n "$CACHED_VLLM_ARCH" ] && [ "$CACHED_VLLM_ARCH" != "$GPU_ARCH_LIST" ]; 
 fi
 
 # Validate --no-build usage
+if [ "$ENSURE_IMAGE" = true ] && [ "$NO_BUILD" = true ]; then
+    echo "Error: --ensure and --no-build are alternatives." >&2
+    exit 1
+fi
 if [ "$NO_BUILD" = true ] && [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
     echo "Error: --no-build requires --copy-to to be specified"
     exit 1
+fi
+
+# --ensure is image-level preparation for any recipe. A qualified tag can be
+# pulled from its configured registry; an unqualified tag is local-only. If the
+# pull is unavailable, the normal eugr build path below uses the caller's
+# source-build flags and image flavor (for example --exp-b12x).
+if [ "$ENSURE_IMAGE" = true ]; then
+    if docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
+        echo "Image '$IMAGE_TAG' already exists locally."
+        NO_BUILD=true
+    elif [[ "$IMAGE_TAG" == */* ]]; then
+        echo "Trying registry image '$IMAGE_TAG'..."
+        if docker pull "$IMAGE_TAG"; then
+            NO_BUILD=true
+        else
+            echo "Registry image unavailable; building '$IMAGE_TAG' locally."
+        fi
+    fi
+    if [ "$NO_BUILD" = true ] && [ "${#COPY_HOSTS[@]}" -eq 0 ]; then
+        exit 0
+    fi
 fi
 
 # Select image preparation path. By default, use the tested nightly runner image.

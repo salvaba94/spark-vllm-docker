@@ -418,7 +418,9 @@ def build_image(
     return result.returncode == 0
 
 
-def download_model(model: str, copy_to: list[str] | None = None) -> bool:
+def download_model(
+    model: str, copy_to: list[str] | None = None, revision: str | None = None
+) -> bool:
     """
     Download model from HuggingFace using hf-download.sh.
 
@@ -443,6 +445,8 @@ def download_model(model: str, copy_to: list[str] | None = None) -> bool:
         return False
 
     cmd = [str(DOWNLOAD_SCRIPT), model]
+    if revision:
+        cmd.extend(["--revision", revision])
     if copy_to:
         cmd.extend(["--copy-to", ",".join(copy_to), "--copy-parallel"])
 
@@ -1158,6 +1162,7 @@ Examples:
     # Determine container image
     container = args.container_override or recipe["container"]
     model = recipe.get("model")
+    model_revision = recipe.get("defaults", {}).get("revision")
     build_args = recipe.get("build_args", [])
 
     # Parse nodes - check command line first, then .env file, then autodiscover
@@ -1345,8 +1350,8 @@ Examples:
     if model and (args.download_only or args.setup or args.force_download):
         if args.dry_run:
             model_exists = check_model_exists(model)
-            if args.force_download or not model_exists or copy_targets:
-                print(f"Would download model: {model}")
+            if args.force_download or not model_exists or copy_targets or model_revision:
+                print(f"Would download model: {model}" + (f" at {model_revision}" if model_revision else ""))
                 if copy_targets:
                     print(f"  Would copy to: {', '.join(copy_targets)}")
             else:
@@ -1359,9 +1364,9 @@ Examples:
 
             # A local cache hit does not mean cluster workers have the model.
             # hf-download.sh reuses the local cache and rsyncs missing files.
-            if args.force_download or not model_exists or copy_targets:
+            if args.force_download or not model_exists or copy_targets or model_revision:
                 print("=== Downloading Model ===")
-                if not download_model(model, copy_targets):
+                if not download_model(model, copy_targets, model_revision):
                     print("Error: Failed to download model")
                     return 1
                 print()

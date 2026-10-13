@@ -1,16 +1,16 @@
-# Xiaomi MiMo-V2.6-Flash-RL on two DGX Sparks. Text/coding baseline.
+# Xiaomi MiMo-V2.6-Flash-RL on two DGX Sparks with its bundled DFlash drafter.
 recipe_version: "1"
 name: MiMo-V2.6-Flash-RL (2 Sparks)
-description: Official MiMo checkpoint with vLLM TP2 and upstream QKV loader fix
+description: Official MiMo checkpoint with vLLM TP2 and bundled DFlash7
 model: XiaomiMiMo/MiMo-V2.6-Flash-RL
-container: vllm-node-b12x
-build_args:
-  - --exp-b12x
+container: vllm-node
 cluster_only: true
 mods:
   - mods/mimo-v2.6-fp8-qkv
+  - mods/mimo-v2.6-dflash-omni
 
 defaults:
+  revision: 5711b268169967567844e1e560e8a3966da959b1
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 2
@@ -25,6 +25,7 @@ env:
 
 command: |
   vllm serve XiaomiMiMo/MiMo-V2.6-Flash-RL \
+    --revision {revision} \
     --host {host} \
     --port {port} \
     --trust-remote-code \
@@ -35,6 +36,8 @@ command: |
     --kv-cache-dtype auto \
     --moe-backend marlin \
     --generation-config vllm \
+    --no-async-scheduling \
+    --speculative-config '{{"method":"dflash","model":"/root/.cache/huggingface/hub/models--XiaomiMiMo--MiMo-V2.6-Flash-RL/snapshots/{revision}/dflash","num_speculative_tokens":7}}' \
     --reasoning-parser mimo \
     --tool-call-parser mimo \
     --enable-auto-tool-choice

@@ -19,6 +19,7 @@ solo_only: true
 mods: []
 
 defaults:
+  revision: 7c4f1bc1a2d6847e0cbc01ac6b823f00251de8dd
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 1
@@ -45,6 +46,7 @@ env:
 
 command: |
   vllm serve local-inference-lab/Qwen3.8-Flash-Next-NVFP4 \
+    --revision {revision} \
     --host {host} \
     --port {port} \
     --trust-remote-code \

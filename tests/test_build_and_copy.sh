@@ -137,8 +137,14 @@ if [ "${1:-}" = "build" ]; then
     )
 fi
 if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
+    if [ "${LOCAL_IMAGE_MISSING:-0}" = 1 ]; then
+        exit 1
+    fi
     echo "${LOCAL_IMAGE_ID:-sha256:local}"
     exit 0
+fi
+if [ "${1:-}" = "pull" ] && [ "${PULL_FAIL:-0}" = 1 ]; then
+    exit 1
 fi
 if [ "${1:-}" = "save" ]; then
     out=""
@@ -264,6 +270,51 @@ assert_output_contains() {
     if ! grep -Eq "$pattern" "$OUTPUT_LOG"; then
         fail "Expected output to match: $pattern"
     fi
+}
+
+test_ensure_reuses_local_image() {
+    setup_fixture
+    run_build --ensure -t registry.example/group/runner:latest --rebuild-vllm || fail "--ensure local reuse failed"
+    assert_log_contains '^docker image inspect registry.example/group/runner:latest$'
+    assert_log_not_contains '^docker pull '
+    assert_log_not_contains '^docker build '
+    pass "--ensure reuses a local image without rebuilding"
+}
+
+test_ensure_pulls_qualified_image() {
+    setup_fixture
+    LOCAL_IMAGE_MISSING=1 run_build --ensure -t registry.example/group/runner:latest --rebuild-vllm || fail "--ensure registry pull failed"
+    assert_log_contains '^docker pull registry.example/group/runner:latest$'
+    assert_log_not_contains '^docker build '
+    pass "--ensure pulls a missing qualified image"
+}
+
+test_ensure_builds_when_registry_unavailable() {
+    setup_fixture
+    LOCAL_IMAGE_MISSING=1 PULL_FAIL=1 run_build --ensure -t registry.example/group/runner:latest --rebuild-vllm --rebuild-flashinfer || fail "--ensure source fallback failed"
+    assert_log_contains '^docker pull registry.example/group/runner:latest$'
+    assert_log_contains '^docker build --target flashinfer-export '
+    assert_log_contains '^docker build --target vllm-export '
+    assert_log_contains '^docker build -t registry.example/group/runner:latest '
+    pass "--ensure builds locally after an unavailable registry pull"
+}
+
+test_ensure_builds_unqualified_tag_without_pull() {
+    setup_fixture
+    LOCAL_IMAGE_MISSING=1 run_build --ensure --exp-b12x -t vllm-node-b12x --rebuild-vllm --rebuild-flashinfer || fail "--ensure local B12X build failed"
+    assert_log_not_contains '^docker pull '
+    assert_log_contains '^docker build --target vllm-export '
+    assert_log_contains '^docker build -t vllm-node-b12x '
+    pass "--ensure builds a missing local B12X tag from source"
+}
+
+test_ensure_copies_existing_image_to_missing_worker() {
+    setup_fixture
+    run_build --ensure -t registry.example/group/runner:latest --copy-to diffhost --rebuild-vllm || fail "--ensure copy failed"
+    assert_log_not_contains '^docker pull '
+    assert_log_not_contains '^docker build '
+    assert_log_contains '^docker save -o .* registry.example/group/runner:latest$'
+    pass "--ensure copies a local image without rebuilding it"
 }
 
 test_default_uses_prebuilt() {
@@ -1679,6 +1730,12 @@ test_b12x_cache_integrity_patch() {
     fi
     pass "B12X validates cached objects and durably publishes replacement kernels"
 }
+
+test_ensure_reuses_local_image
+test_ensure_pulls_qualified_image
+test_ensure_builds_when_registry_unavailable
+test_ensure_builds_unqualified_tag_without_pull
+test_ensure_copies_existing_image_to_missing_worker
 
 test_default_uses_prebuilt
 test_tf5_uses_prebuilt_tf5_tag

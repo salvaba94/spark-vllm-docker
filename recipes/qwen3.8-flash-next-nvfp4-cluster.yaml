@@ -16,6 +16,7 @@ cluster_only: true
 mods: []
 
 defaults:
+  revision: 7c4f1bc1a2d6847e0cbc01ac6b823f00251de8dd
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 2
@@ -39,8 +40,12 @@ env:
   VLLM_ENABLE_ROCE_ALLREDUCE: "1"
   VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
 
+# B12X's weight-source loader can resolve the Hub's moving main revision even
+# when --revision pins the model config. Serve the mounted pinned snapshot so
+# config and weights always come from the same checkpoint on both nodes.
 command: |
-  vllm serve local-inference-lab/Qwen3.8-Flash-Next-NVFP4 \
+  vllm serve /root/.cache/huggingface/hub/models--local-inference-lab--Qwen3.8-Flash-Next-NVFP4/snapshots/{revision} \
+    --revision {revision} \
     --host {host} \
     --port {port} \
     --trust-remote-code \

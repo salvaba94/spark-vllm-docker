@@ -16,6 +16,7 @@ cluster_only: true
 mods: []
 
 defaults:
+  revision: a608241037e4c2565356bff7ca293f2133888f88
   port: 8000
   host: 0.0.0.0
   tensor_parallel: 2
@@ -49,6 +50,7 @@ env:
 
 command: |
   vllm serve local-inference-lab/GLM-5.3-Flash-NVFP4-Spark \
+    --revision {revision} \
     --host {host} \
     --port {port} \
     --tensor-parallel-size {tensor_parallel} \
