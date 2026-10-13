@@ -49,7 +49,6 @@ command: |
     --revision {revision} \
     --host {host} \
     --port {port} \
-    --trust-remote-code \
     --tensor-parallel-size {tensor_parallel} \
     --pipeline-parallel-size {pipeline_parallel} \
     --mamba-cache-mode align \

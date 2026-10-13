@@ -2,7 +2,7 @@
 # vLLM Docker Optimized for DGX Spark (single or multi-node)
 
 This repository contains the Docker configuration and startup scripts to run vLLM on DGX Spark, from a single node to multi-node clusters using Ray or vLLM's native PyTorch distributed mode. It supports InfiniBand/RDMA (NCCL), custom environment configuration, and high-performance model loading through fastsafetensors and InstantTensor.
-Cluster setup supports direct connections between dual Sparks, QSFP/RoCE switch configurations, and 3-node mesh configurations.
+Cluster setup supports direct connections between dual Sparks, QSFP/RoCE switch configurations, 3-node mesh configurations, and [closed rings](docs/NETWORKING.md#closed-rings-of-four-or-more-sparks).
 
 While it was primarily developed to support multi-node inference, it works just as well on single-node setups.
 
@@ -30,7 +30,7 @@ repository changes use the separate [development guide](docs/AGENT_DEVELOPMENT.m
 
 ## DISCLAIMER
 
-This repository is not affiliated with NVIDIA or their subsidiaries. This is a community effort aimed to help DGX Spark users to set up and run the most recent versions of vLLM on Spark cluster or single nodes. 
+This repository is not affiliated with NVIDIA or their subsidiaries. This is a community effort aimed to help DGX Spark users to set up and run the most recent versions of vLLM on Spark cluster or single nodes.
 
 By default, `build-and-copy.sh` pulls the tested nightly runner image from DockerHub: `eugr/spark-vllm:latest`. Nightly images are built and tested on multiple models in both cluster and solo configuration before `latest` is advanced.
 We will expand the selection of models we test in the pipeline, but since vLLM is a rapidly developing platform, some things may break.
@@ -48,11 +48,12 @@ WSL, vLLM keeps CUDA's reported free memory instead of replacing it with guest
 RAM availability. Native Linux UMA accounting and proactive allocator-cache
 release keep their upstream behavior.
 
-Source builds also trim unused glibc CPU heap pages after startup garbage
-collection in API servers and workers. This complements the existing CUDA
-allocator cleanup before KV cache sizing/allocation. The CPU trim is included
-in exported vLLM wheels and runs after warmup; platforms without `malloc_trim`
-skip it.
+Regular and B12X source builds also trim unused glibc CPU heap pages before
+the final KV cache sizing measurement, after profiling cleanup. On Spark's
+shared CPU/GPU memory, this prevents freed loader/profiling buffers retained
+by glibc from reducing the KV budget. API servers and workers still trim after
+startup garbage collection and warmup. Both trims are included in exported
+vLLM wheels; platforms without `malloc_trim` skip them.
 
 Runtime images also set `VLLM_WSL2_ENABLE_PIN_MEMORY=1` by default. Pass
 `-e VLLM_WSL2_ENABLE_PIN_MEMORY=0` to `launch-cluster.sh` or `docker run` to opt
@@ -66,8 +67,6 @@ remain exempt. This includes protecting `/metrics`, `/tokenize`, and the API
 docs. The patch is included in exported vLLM wheels and leaves the Rust
 frontend unchanged.
 
-B12X autotuning is disabled by default with `B12X_AUTOTUNE=0` on all GPU
-architectures. Pass `-e B12X_AUTOTUNE=1` to enable it for a launch.
 
 ## QUICK START (USING RECIPES)
 
@@ -135,7 +134,7 @@ Launch the server:
     --port 8000 \
     --trust-remote-code \
     --kv-cache-dtype fp8 \
-    --gpu-memory-utilization 0.7 \
+    --gpu-memory-utilization 0.8 \
     --max-model-len 262144 \
     --max-num-seqs 8 \
     --max-num-batched-tokens 16384 \
@@ -313,6 +312,44 @@ for additional launcher options.
 
 ## CHANGELOG
 
+### 2026-10-07
+
+B12X is now part of Flashinfer! `--exp-b12x` builds now build Flashinfer from  [`local-inference-lab/flashinfer@main`](https://github.com/local-inference-lab/flashinfer/tree/main),
+with separate wheel caches and no `flashinfer-cubin` wheel. Regular builds
+continue to use upstream FlashInfer. Both lanes now rely on FlashInfer for
+B12X instead of installing the standalone `b12x` package.
+
+### 2026-10-05
+
+#### Deepseek V4.1 Flash recipes for 3x and 4x Sparks
+
+Added new recipes for Deepseek V4.1 Flash for 3x and 4x Sparks (with or without switch). Both use tensor parallelism and give you similar performance (~73 t/s speedbench coding).
+
+To run on 3-node mesh/ring:
+
+```bash
+./run-recipe.sh recipes/3x-spark-cluster/deepseek-v4.1-flash.yaml --setup
+```
+
+To run on a 4-node cluster (switch or ring):
+
+```bash
+./run-recipe.sh recipes/4x-spark-cluster/deepseek-v4.1-flash.yaml --setup
+```
+
+#### Switchless ring support
+
+Spark-vllm-docker now supports switchless ring configurations with the number of nodes >3.
+Tested with 4x ring, but should work with larger rings as well (will test when get access to one).
+
+Autodiscovery and container/model distribution handle ring setups as long as it's networking
+is properly configured and passwordless SSH is set up as outlined in the
+[Networking Guide](docs/NETWORKING.md#example-four-node-ring).
+
+**No change in the recipes is needed!**
+
+Ring setup has one limitation compared to switch-based setups - you can either use full ring capacity, solo, or 2 nodes. Nodes participating in inference need to either be directly connected or form a complete ring. Open-ended configurations will not work (e.g. 3 node inference in 4 node ring).
+
 ### 2026-10-02
 
 `hf-download.sh` now supports model cache management locally and across the
@@ -332,6 +369,8 @@ commit by hash, unique prefix, branch, or tag. `--backup --delete` removes cache
 copies only after a successful backup and coverage checks. Deletion and cleanup
 ask for confirmation unless `--force` is supplied, and missing `uvx`
 installations are now handled automatically on the head and peer nodes.
+Backups automatically use regular snapshot files on external drives without
+symlink support, with the same listing, restore, and revision selection commands.
 
 ### 2026-09-30
 
@@ -496,7 +535,7 @@ B12X source builds now use `local-inference-lab/vllm@dev/infernal-invocation`.
 #### PyTorch 2.13 and CUTLASS DSL 4.7
 
 Regular and B12X builds now use PyTorch 2.13.0, torchvision 0.28.0,
-torchaudio 2.11.0, and CUTLASS DSL 4.7.0. 
+torchaudio 2.11.0, and CUTLASS DSL 4.7.0.
 
 ### 2026-08-11
 
@@ -533,7 +572,7 @@ Since it is built from a forked vLLM branch, it will be supported in parallel to
 
 Specifying `--exp-b12x` without arguments will pull `eugr/spark-vllm-b12x:latest` from Dockerhub, which is now built and tested together with the main image by CI pipeline on nightly basis (if there are any updates to the source branch or B12X).
 
-Add `--rebuild-vllm` to compile from the source. 
+Add `--rebuild-vllm` to compile from the source.
 
 The preset defaults the image tag to `vllm-node-b12x`; an explicit `-t` still takes precedence. Additional vLLM changes can be layered onto the preset with one or more `--apply-vllm-pr` flags. PRs are applied from the upstream vLLM repository, not from Luke's fork! If any PRs are specified, the script will build from the source, not prebuilt images.
 
@@ -868,7 +907,7 @@ Added `minimax-m2.7-awq`, a cluster-only MiniMax M2.7 AWQ recipe using `cyankiwi
 
 ### 2026-04-14
 
-Added `--load-format instanttensor` support to vLLM - thanks @SeraphimSerapis. 
+Added `--load-format instanttensor` support to vLLM - thanks @SeraphimSerapis.
 An experimental option for now, but allows for faster loading than the current fastsafetensors default. You need to rebuild the container to start using the option, but you don't have to trigger the source build.
 
 ### 2026-04-12
@@ -893,7 +932,7 @@ Single Spark:
 ./run-recipe.sh gemma4-26b-a4b --solo
 ```
 
-Dual Sparks: 
+Dual Sparks:
 
 ```bash
 ./run-recipe.sh gemma4-26b-a4b --no-ray
@@ -1016,7 +1055,7 @@ Default is `29501`.
 
 #### `--network` Parameter in Build Arguments
 
-Added `--network <name>` to `build-and-copy.sh` to allow using host networking during builds. 
+Added `--network <name>` to `build-and-copy.sh` to allow using host networking during builds.
 Thanks @apairmont for the PR.
 
 ### 2026-03-17
@@ -1040,7 +1079,7 @@ By default it will try to allocate 108 GiB for vLLM on each node. You can change
 
 1. The current firmware may cause sudden shutdown event on one or both Sparks during heavy inference. If you have this issue, you will need to lower GPU clock frequency on the affected unit(s), e.g. `sudo nvidia-smi -lgc 200,2150`. This command will reduce max GPU frequency to 2150 MHz. You can play with higher values to see what works for you (default is 2411 MHz, but can boost to 3000 MHz). Please note that this setting only survives until the next reboot, but can be applied at any time.
 2. You will need to use the new `--no-ray` argument to fit full context.
-3. If the model gets stuck loading weights, clearing the cache on both nodes can "unstuck" it. Use `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'` to clear the cache. 
+3. If the model gets stuck loading weights, clearing the cache on both nodes can "unstuck" it. Use `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'` to clear the cache.
 
 
 #### Major Cluster Orchestration Refactoring
@@ -1316,7 +1355,7 @@ To disable this behavior (clean start), use `--no-cache-dirs` flag.
 
 #### Recipes support
 
-A major contribution from @raphaelamorim - model recipes. 
+A major contribution from @raphaelamorim - model recipes.
 Recipes allow to launch models with preconfigured settings with one command.
 
 Example:
@@ -1348,8 +1387,8 @@ Please refer to the [documentation](recipes/README.md) for the details.
 
 #### Launch script option
 
-You can now specify a launch script to execute on head node instead of specifying a command directly via `exec` action. 
-Example: 
+You can now specify a launch script to execute on head node instead of specifying a command directly via `exec` action.
+Example:
 
 ```bash
 ./launch-cluster.sh --launch-script examples/vllm-openai-gpt-oss-120b.sh
@@ -1406,7 +1445,7 @@ For example, to run nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 on a single node
     --reasoning-parser nano_v3 \
     --kv-cache-dtype fp8 \
     --gpu-memory-utilization 0.7 \
-    --load-format fastsafetensors 
+    --load-format fastsafetensors
 ```
 
 Please note, that NVFP4 models on Spark are not fully supported on vLLM (any build) yet, so the performance will not be optimal. You will likely see Flashinfer errors during load. This model is also known to crash sometimes.
@@ -1651,7 +1690,7 @@ PR for MiniMax-M2 has been merged into main, so removed the temporary patch from
 
 ### 2025-12-11
 
-Applied a patch to fix broken MiniMax-M2 in some quants after [this commit](https://github.com/vllm-project/vllm/commit/d017bceb08eaac7bae2c499124ece737fb4fb22b) until [this PR](https://github.com/vllm-project/vllm/pull/30389) is approved. 
+Applied a patch to fix broken MiniMax-M2 in some quants after [this commit](https://github.com/vllm-project/vllm/commit/d017bceb08eaac7bae2c499124ece737fb4fb22b) until [this PR](https://github.com/vllm-project/vllm/pull/30389) is approved.
 See [this issue](https://github.com/vllm-project/vllm/issues/30445) for details.
 
 ### 2025-12-05
@@ -1687,6 +1726,13 @@ local source-build fallback, supply the usual build flags:
 Omit `--ensure` when an intentional rebuild is needed. `--ensure` prepares only
 the image; `run-recipe.sh <recipe> --download-only` handles model weights.
 
+Source builds select DeepGEMM after applying vLLM patches. vLLM refs that require
+the stable-ABI `deep_gemm/_C.py` interface use the repository and commit declared
+in that ref's CMake configuration. Older refs, including the current B12X fork,
+retain the pinned DeepGEMM SM121 workaround. The build checks required source
+files before compiling and records the selected commit in `.deepgemm-commit`
+alongside the exported wheels.
+
 **Basic usage (prepare local image):**
 
 ```bash
@@ -1717,6 +1763,14 @@ nodes in the cluster and excludes the current node.
 `-c` / `--copy-to` requests distribution. With no addresses, the script uses
 `COPY_HOSTS` from `.env` or autodiscovery; `--copy-parallel` transfers to all
 resolved hosts concurrently.
+
+Hosts with matching image IDs are skipped. If IDs differ, the scripts compare
+the image's platform, ordered filesystem layer hashes, and runtime configuration.
+This recognizes equivalent images across classic Docker and containerd image
+stores, including locally built or saved/loaded images without registry digests.
+The same check runs before cluster launch. It requires Python 3 on the head
+only; workers need Docker. If content cannot be verified, distribution copies
+the image and cluster launch rejects differing IDs.
 
 **Manual host fallback:**
 
@@ -1807,12 +1861,18 @@ For the maintained experimental B12X combination, the equivalent shortcut is:
 
 Without local-build flags, this pulls `eugr/spark-vllm-b12x:latest` and tags it
 as `vllm-node-b12x` unless `-t` is supplied. To build the maintained combination
-from `local-inference-lab/vllm@dev/jovian-judgement` and the `master` branch of the
-B12X repository, run:
+from `local-inference-lab/vllm@dev/karmic-kraken` and
+`local-inference-lab/flashinfer@main`, run:
 
 ```bash
 ./build-and-copy.sh --exp-b12x --rebuild-vllm
 ```
+
+This builds the fork's FlashInfer wheels when its cache is missing or incomplete.
+Add `--rebuild-flashinfer` to refresh an existing cached set. B12X builds omit
+the `flashinfer-cubin` wheel and retain the Python, JIT-cache, and required
+JIT provider wheels. They never download regular FlashInfer wheels;
+`--force-flashinfer-download` is unsupported for this lane.
 
 It can be combined with `--apply-vllm-pr <pr-num>` to build custom vLLM patches.
 The preset preserves selected Blackwell subarchitectures in vLLM's CUDA 13
@@ -1843,8 +1903,10 @@ Wheel profiles are selected automatically:
 ```text
 .wheel-cache/
 ├── flashinfer/
-│   ├── regular/   # shared by regular and B12X builds
-│   └── custom/    # custom ref/PR or non-default GPU target
+│   ├── regular/       # upstream FlashInfer
+│   ├── custom/        # upstream with a custom ref/PR or GPU target
+│   ├── b12x/          # local-inference-lab FlashInfer, without cubins
+│   └── b12x-custom/   # fork with a custom ref/PR or GPU target
 └── vllm/
     ├── regular/
     ├── b12x/
@@ -1860,19 +1922,16 @@ at `/workspace/vllm/structured_server.py` in the container when the selected
 vLLM source includes it. The script travels with locally exported wheels;
 older source refs and downloaded wheel sets without it skip this copy.
 
-Regular `vllm-project/vllm` runner builds install the latest `b12x` release from
-PyPI, including builds using precompiled vLLM wheels. A per-build cache key and
-package-index refresh prevent stale B12X releases from being reused. The
-`--no-deps` install preserves the image's Torch and CUTLASS DSL versions.
-
 The `--exp-b12x` profile and any branch, tag, or commit selected from
-`local-inference-lab/vllm` continue to clone the `master` ref of
-`https://github.com/lukealonso/b12x.git` and install its `b12x` distribution.
-A per-build cache key prevents Docker from reusing a stale source checkout.
-Before the `--no-deps` install, its package metadata is updated to the image-wide
-CUTLASS DSL 4.7.0 pin. The exact source commit is recorded at
-`/workspace/b12x-source-commit`. B12X requires PyTorch 2.12 or newer; both current
-build profiles use 2.13.0.
+`local-inference-lab/vllm` use the FlashInfer fork. Regular builds keep the
+original `flashinfer-ai/flashinfer` source and published wheel release.
+`--flashinfer-ref` and `--apply-flashinfer-pr` apply to the selected FlashInfer
+repository. Source checkout caches are isolated by repository as well.
+
+Neither lane installs the standalone `b12x` package from PyPI or Git. B12X is
+part of FlashInfer, including the compatibility imports and cache-integrity
+fix in the fork. Build metadata records the FlashInfer repository, ref, and
+commit. Both current build profiles use PyTorch 2.13.0.
 
 **Copy existing image without rebuilding:**
 
@@ -1889,7 +1948,7 @@ build profiles use 2.13.0.
 | `--gpu-arch <arch>` | Target GPU architecture for wheel/source builds. Non-default targets rebuild FlashInfer unless the local cache is marked for that architecture. The default `12.1a` still uses the prebuilt image unless another build-forcing flag is set. |
 | `--rebuild-flashinfer` | Skip prebuilt wheel download; force a fresh local FlashInfer build |
 | `--rebuild-vllm` | Force rebuild vLLM from source |
-| `--force-flashinfer-download` | Force download FlashInfer wheels, skipping cached wheel checks |
+| `--force-flashinfer-download` | Force download upstream FlashInfer wheels, skipping cached wheel checks; unsupported for B12X |
 | `--force-vllm-download` | Force download vLLM wheels, skipping cached wheel checks |
 | `--force-download` | Force download all prebuilt wheels, skipping cached wheel checks |
 | `--vllm-repo <url>` | vLLM Git repository. Defaults to `https://github.com/vllm-project/vllm.git`; custom repositories bypass the shared checkout cache and force a source build. |
@@ -1901,11 +1960,11 @@ build profiles use 2.13.0.
 | `--flashinfer-ref <ref>` | FlashInfer commit SHA, branch or tag (default: `main`) |
 | `--apply-vllm-pr <pr-or-url>` | Apply a vLLM PR patch during the image build. Numbers select `vllm-project/vllm`; full `https://github.com/OWNER/REPO/pull/NUMBER` URLs select another public GitHub repository. Repeatable. This is distinct from the launch-time option accepted by `launch-cluster.sh` and `run-recipe.sh`. |
 | `--apply-preset-vllm-prs` | Apply preset vLLM PRs even when `--vllm-repo`, `--vllm-ref`, or `--apply-vllm-pr` would otherwise suppress them |
-| `--apply-flashinfer-pr <pr-num>` | Apply a FlashInfer PR patch during build. Can be specified multiple times. |
+| `--apply-flashinfer-pr <pr-num>` | Apply a PR from the selected FlashInfer repository during build. Can be specified multiple times. |
 | `--tf5` | Deprecated compatibility flag; pulls/tags the prebuilt image as `vllm-node-tf5` unless another build-forcing flag is set. Aliases: `--pre-tf, --pre-transformers`. |
 | `--exp-mxfp4` | Build with experimental native MXFP4 support. Alias: `--experimental-mxfp4`. |
 | `--exp-b12x` | Select the B12X profile. Pulls `eugr/spark-vllm-b12x:latest` unless a local wheel/image build is requested; defaults to local tag `vllm-node-b12x`. Alias: `--experimental-b12x`. |
-| `-c, --copy-to <hosts>` | Host(s) to copy the image to after preparation (space- or comma-separated). Hosts with the same image ID are skipped. |
+| `-c, --copy-to <hosts>` | Host(s) to copy the image to after preparation (space- or comma-separated). Hosts with matching image IDs or equivalent image content are skipped. |
 | `--copy-to-host` | Alias for `--copy-to` (backwards compatibility). |
 | `--copy-parallel` | Copy to all specified hosts concurrently. |
 | `-j, --build-jobs <jobs>` | Number of parallel build jobs (default: 16) |
@@ -1947,7 +2006,7 @@ The `launch-cluster.sh` script simplifies the process of starting the cluster no
 This will:
 1.  Auto-detect the active InfiniBand and Ethernet interfaces.
 2.  Auto-detect the node IP.
-3.  Verify that the selected Docker image has the same content-addressable image ID on the head and every worker.
+3.  Verify that the selected Docker image has matching IDs or equivalent image content on the head and every worker.
 4.  Launch idle containers on the head and worker nodes.
 5.  Use native no-Ray multiprocessing by default, or start Ray when `--ray` is selected.
 
@@ -1955,14 +2014,14 @@ Assumptions and limitations:
 
 - It assumes that you've already set up passwordless SSH access on all nodes. If not, follow NVIDIA's [Connect Two Sparks Playbook](https://build.nvidia.com/spark/connect-two-sparks/stacked-sparks). I recommend setting up static IPs in the configuration instead of automatically assigning them every time, but this script should work with automatically assigned addresses too.
 - By default, it assumes that the container image name is `vllm-node`. If it differs, you need to specify it with `-t <name>` parameter.
-- Before launching a multi-node cluster, it compares `docker image inspect` IDs for the selected image on the head and every active worker. The launch is aborted if an image is missing or any ID differs.
+- Before launching a multi-node cluster, it compares `docker image inspect` IDs for the selected image on the head and every active worker. Differing IDs are accepted only when the platform, filesystem layers, and runtime configuration match. The launch is aborted if an image is missing or equivalence cannot be verified.
 - If both ConnectX **physical** ports are utilized, and both have IP addresses, it will use whatever interface it finds first. Use `--eth-if` to override.
 - It will ignore IPs associated with the 2nd "clone" of the physical interface. For instance, the outermost port on Spark has two logical Ethernet interfaces: `enp1s0f1np1` and `enP2p1s0f1np1`. Only `enp1s0f1np1` will be used. To override, use `--eth-if` parameter.
 - It assumes that the same physical interfaces are named the same on all nodes (IOW, enp1s0f1np1 refers to the same physical port on all nodes). If it's not the case, you will have to launch cluster nodes manually or modify the script.
 - It clears the Docker image entrypoint by default so images that define an entrypoint, such as `vllm-openai`, can still start as idle cluster containers before commands are executed. Use `--keep-entrypoint` to keep the image entrypoint.
 - Solo mode uses loopback for internal vLLM, NCCL, Gloo, and TensorPipe communication and disables NCCL RDMA, even when `.env` contains cluster interfaces or a cluster IP. This also applies when a single-node configuration automatically selects solo mode. Explicit `--eth-if` and container environment settings (`-e` or `CONTAINER_*`) can override these defaults. The API listening address is still controlled by `vllm serve --host`.
 - In solo mode, `-p` / `--publish` can be used to publish ports in Docker format, for example `-p 8000:8000`. When port publishing is used, the launcher does not use host networking. Port publishing is not supported in cluster mode.
-- It sets `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` in each container by default to reduce allocator fragmentation on DGX Spark. Override it with `-e PYTORCH_CUDA_ALLOC_CONF=<value>` when needed.
+- It leaves `PYTORCH_CUDA_ALLOC_CONF` unset by default. PyTorch defaults to `expandable_segments:False` while retaining normal memory caching. Opt in for workloads that benefit with `-e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`, or set `PYTORCH_CUDA_ALLOC_CONF` in the recipe's `env` section.
 - It mounts `~/.cache/huggingface`, `~/.cache/vllm`, `~/.cache/flashinfer`, `~/.cache/b12x`, `~/.triton`, and `~/.tilelang` by default. Use `--no-cache-dirs` to skip the vLLM/FlashInfer/B12X/Triton/TileLang cache mounts. Add other mounts with repeatable Docker-style `-v` / `--volume` options, e.g. `-v "$HOME/my-data:/data"`.
 
 
@@ -2181,6 +2240,8 @@ When `--non-privileged` is specified:
 - Resource limits are applied: memory (110GB), memory+swap (120GB), pids (4096)
 
 All launch modes set Docker's open-file ulimit to `1048576`, which avoids loader failures when highly sharded models are opened in parallel by Ray workers. Override it with `VLLM_SPARK_NOFILE_LIMIT` if your host requires a different value.
+
+All launch modes also set `--ulimit memlock=-1:-1` on head and worker containers so NCCL/RDMA memory registration is not constrained by Docker's locked-memory limits. This does not increase the amount of available RAM or change container memory limits.
 
 These resource limits can be customized:
 ```bash
@@ -2506,6 +2567,11 @@ the existing CUDA-based accounting under WSL. InstantTensor's budget fraction
 (`INSTANTTENSOR_MAX_FREE_MEM_USAGE`, default `0.5`), minimum across distributed
 ranks, and buffer-size checks still apply.
 
+InstantTensor 0.2.1 includes native Linux UMA accounting, but does not exclude
+WSL from that path. The patch remains necessary for the WSL policy and supports
+both 0.2.0 and 0.2.1, preserving 0.2.1's budget validation and error handling
+across distributed ranks.
+
 These runners also default to `INSTANTTENSOR_IO_DEPTH=16` to reduce GPU and
 pinned host staging-buffer usage. Override it through a recipe's `env` settings
 or `-e INSTANTTENSOR_IO_DEPTH=<depth>` with `launch-cluster.sh` or `docker run`.
@@ -2658,10 +2724,18 @@ because Hugging Face's hash-based removal can affect other repositories.
 ```
 
 Backup copies all revisions available on the head into
-`<backup-dir>/models--<org>--<model>`, preserving snapshot links and copying any
-shared Hub blobs into the backup. The result is self-contained and requires a
-filesystem supporting symlinks. A backup is published only after the copy
-succeeds and its links and refs validate. Existing backups are preserved;
+`<backup-dir>/models--<org>--<model>`. On filesystems supporting symlinks, it
+preserves snapshot links and copies any shared Hub blobs into the backup.
+The script tests the destination's symlink support before copying. On external
+drives that cannot create symlinks, it saves regular files inside each snapshot
+and omits the separate blob directory to avoid storing the same weights twice.
+This fallback also skips Unix ownership and permission preservation. Revisions
+that share weights can require more space because each snapshot has its own
+files. Both layouts are self-contained and work with `--list-backup`,
+`--restore`, and `--backup --delete`. The same fallback applies to backups
+selected with `--revision`.
+A backup is published only after the copy succeeds and its files, links, and
+refs validate. Existing backups are preserved;
 choose a different backup directory to make another backup of the same model.
 The backup directory must be outside the Hub cache, and must already exist.
 

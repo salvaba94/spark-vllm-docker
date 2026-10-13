@@ -94,6 +94,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from cluster_topology import Topology, validate_launch
+
 try:
     import yaml
 except ImportError:
@@ -371,7 +373,8 @@ def check_image_exists(image: str, host: str | None = None) -> bool:
 
 
 def build_image(
-    image: str, copy_to: list[str] | None = None, build_args: list[str] | None = None
+    image: str, copy_to: list[str] | None = None, build_args: list[str] | None = None,
+    *, copy_only: bool = False,
 ) -> bool:
     """
     Build the container image using build-and-copy.sh.
@@ -403,7 +406,11 @@ def build_image(
         return False
 
     cmd = [str(BUILD_SCRIPT), "-t", image]
-    if build_args:
+    if ENV_FILE and ENV_FILE.exists():
+        cmd.extend(["--config", str(ENV_FILE)])
+    if copy_only:
+        cmd.append("--no-build")
+    elif build_args:
         cmd.extend(build_args)
     if copy_to:
         cmd.extend(["--copy-to", ",".join(copy_to), "--copy-parallel"])
@@ -447,6 +454,8 @@ def download_model(
     cmd = [str(DOWNLOAD_SCRIPT), model]
     if revision:
         cmd.extend(["--revision", revision])
+    if ENV_FILE and ENV_FILE.exists():
+        cmd.extend(["--config", str(ENV_FILE)])
     if copy_to:
         cmd.extend(["--copy-to", ",".join(copy_to), "--copy-parallel"])
 
@@ -1303,6 +1312,26 @@ Examples:
             print(f"Runtime vLLM PRs: {', '.join(cli_vllm_prs)}")
         print()
 
+    ring_env = {}
+    if is_cluster and env.get("CLUSTER_LINKS"):
+        try:
+            topology = Topology.from_env(env)
+            if not (args.build_only or args.download_only):
+                # Validate the effective launch before setup mutates image/model state.
+                topology_overrides = {key: getattr(args, key) for key in (
+                    "port", "host", "tensor_parallel", "gpu_memory_utilization", "max_model_len"
+                ) if getattr(args, key) is not None}
+                topology_script = generate_launch_script(
+                    recipe, topology_overrides, is_solo=False, extra_args=extra_args, use_ray=use_ray)
+                nccl_env = {key.removeprefix("CONTAINER_"): value for key, value in env.items()
+                            if key.startswith("CONTAINER_")}
+                nccl_env.update(dict(item.split("=", 1) for item in args.env_vars if "=" in item))
+                nccl_env.update(recipe.get("env", {}))
+                ring_env = validate_launch(topology, nodes, topology_script, use_ray, nccl_env)
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+
     # --- Build Phase ---
     if args.build_only or args.setup or args.force_build:
         if args.dry_run:
@@ -1327,18 +1356,24 @@ Examples:
                 print()
             else:
                 print(f"Container '{container}' already exists locally.")
-                # Check worker nodes in cluster mode
-                if copy_targets:
-                    missing_on = []
-                    for worker in copy_targets:
-                        if not check_image_exists(container, worker):
-                            missing_on.append(worker)
-                    if missing_on:
-                        print(f"Container missing on workers: {', '.join(missing_on)}")
-                        print("Building and copying...")
-                        if not build_image(container, missing_on, build_args):
-                            print("Error: Failed to build/copy container")
-                            return 1
+                if copy_targets and env.get("CLUSTER_LINKS"):
+                    # Compare exact image IDs using the saved copy paths.
+                    if not build_image(container, copy_targets, copy_only=True):
+                        print("Error: Failed to synchronize container image")
+                        return 1
+                else:
+                    # Check worker nodes in cluster mode
+                    if copy_targets:
+                        missing_on = []
+                        for worker in copy_targets:
+                            if not check_image_exists(container, worker):
+                                missing_on.append(worker)
+                        if missing_on:
+                            print(f"Container missing on workers: {', '.join(missing_on)}")
+                            print("Building and copying...")
+                            if not build_image(container, missing_on, build_args):
+                                print("Error: Failed to build/copy container")
+                                return 1
                 print()
 
         if args.build_only:
@@ -1448,6 +1483,11 @@ Examples:
         extra_args=extra_args,
         use_ray=use_ray,
     )
+
+    if ring_env:
+        script_content = script_content.replace(
+            "#!/bin/bash\n", "#!/bin/bash\n" + "".join(
+                f"export {key}={value}\n" for key, value in ring_env.items()), 1)
 
     if args.dry_run:
         print("=== Generated Launch Script ===")

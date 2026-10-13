@@ -24,7 +24,7 @@ defaults:
   gpu_memory_utilization: 0.65
   max_model_len: 262144
   max_num_seqs: 4
-  max_num_batched_tokens: 32768
+  max_num_batched_tokens: 4096
 
 # Environment variables
 env:
